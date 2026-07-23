@@ -1,0 +1,225 @@
+import argparse
+import os
+import shlex
+import sys
+import textwrap
+import traceback
+
+class Command(object):
+    def get_parser(self):
+        p = argparse.ArgumentParser(add_help=False, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        p.set_defaults(func=self)
+        return p
+
+    def __call__(self, args):
+        """Handle parsed args and return success True/False."""
+        raise NotImplementedError
+
+class Exit(Command):
+    def __init__(self):
+        self.parser = self.get_parser()
+    def __call__(self, args):
+        sys.exit()
+
+class Commands(object):
+    """Manage commands."""
+    def __init__(self, *caches, **kwargs):
+        """Initialize Commands.
+
+        cache: a dict of cached values or a list of keys to cache.
+        Cache will track the most recent non-None value for the
+        given keys.
+
+        kwargs: keyword arguments with values for the cache.
+        """
+        self.parser = p = argparse.ArgumentParser()
+        self.parser.set_defaults(func=self.check)
+        self.sub = p.add_subparsers()
+        self.cache = {}
+        for cache in caches:
+            if not cache:
+                continue
+            elif isinstance(cache, dict):
+                self.cache.update(cache)
+            else:
+                try:
+                    for _ in cache:
+                        self.cache[_] = None
+                except TypeError:
+                    raise ValueError('Bad cache value {}'.format(cache))
+        self.cache.update(kwargs)
+        self(Exit)
+        self._extraargs = []
+
+    @staticmethod
+    def check(args):
+        print(args)
+
+    def add_extra(self, parser):
+        for args, kwargs in self._extraargs:
+            parser.add_argument(*args, **kwargs)
+
+    def add_argument(self, *args, **kwargs):
+        self._extraargs.append((args, kwargs))
+        return self.parser.add_argument(*args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        """Decorate or copy.
+
+        If the first arg is callable, then assume decorator mode.  Call
+        it with args/kwargs and create a subparser with parents=[result.parser].
+
+        Otherwise, create a new instance of commands with extra cache values.
+        """
+        if args and callable(args[0]):
+            inst = args[0](*args[1:], **kwargs)
+            sub = self.sub.add_parser(
+                args[0].__name__.lower(),
+                parents=[inst.parser],
+                formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+            return args[0]
+        elif args and isinstance(args[0], str) and len(args) == 1 and not kwargs:
+            return self.handle(args[0])
+        else:
+            ret = type(self)(self.cache, *args, **kwargs)
+            for name, p in self.sub.choices.items():
+                ret.sub.add_parser(
+                    name,
+                    parents=[p],
+                    add_help=False,
+                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+            self.add_extra(ret)
+            return ret
+
+    def bash_setup(self, package, filename=None, flags=()):
+        """Return a bash script to create a "drive" command to access drive apis.
+
+        package: the __package__ for the __main__.py  The package should be run as __main__
+                 for the apis.
+        filename: the filename of the __main__.py to find the directory to set PYTHONPATH
+                  if applicable.
+        flags: sequence of str flags or single str flag to actually run.
+        """
+        command = []
+        if filename is not None:
+            os.path.dirname(filename)
+            drivepath = os.path.join(
+                os.path.dirname(filename),
+                *['..' for _ in package.split('.')])
+            pypath = os.environ.get('PYTHONPATH', None)
+            if pypath:
+                pypath = os.pathsep.join([os.path.normpath(drivepath), pypath])
+            else:
+                pypath = drivepath
+            command.append('PYTHONPATH=' + pypath)
+        script = textwrap.dedent(r'''
+            gdrive() {{
+                if ! declare -p __PY_GOOGLEDRIVE__ &>/dev/null
+                then
+                    if [[ "${{*}}" = exit ]]
+                    then
+                        echo "Google Drive not active."
+                        return
+                    fi
+                    coproc __PY_GOOGLEDRIVE__ {{ {COMMAND} ;}}
+                fi
+                local fds=("${{__PY_GOOGLEDRIVE__[@]}}")
+                local result
+                trap 'return' SIGPIPE
+                trap 'trap - RETURN SIGPIPE' RETURN
+                {{
+                    printf '%q %s\n' "${{PWD}}" "${{*@Q}}"
+                    while ! read -r -t 1 -u ${{fds[0]}} result
+                    do
+                        if read -t 0
+                        then
+                            read -r result
+                            printf '%s\n' "${{result}}"
+                        fi
+                    done
+                }} >&${{fds[1]}}
+                [[ "${{*}}" = exit ]] && wait "${{__PY_GOOGLEDRIVE___PID}}"
+                return "${{result:-1}}"
+            }}
+            __drive_completer() {{
+                COMPREPLY=()
+                if ((${{COMP_CWORD}} == 1))
+                then
+                    local candidate
+                    for candidate in {CHOICES}
+                    do
+                        if [[ "${{candidate}}" = "${{2}}"* ]]
+                        then
+                            COMPREPLY+=("${{candidate}}")
+                        fi
+                    done
+                fi
+            }}
+            complete -F __drive_completer -o filenames -o default -o bashdefault gdrive
+            ''')
+        command.extend([sys.executable, '-m', package])
+        if isinstance(flags, str):
+            command.append(flags)
+        else:
+            command.extend(flags)
+        return script.format(
+            CHOICES=shlex.join(self.sub.choices),
+            COMMAND=shlex.join(command),
+        )
+
+    def main(self, package, filename=None):
+        p = argparse.ArgumentParser()
+        p.add_argument('-r', '--run', action='store_true')
+        args = p.parse_args()
+        if args.run:
+            self.run()
+        else:
+            shell = os.environ.get('SHELL', None)
+            if shell is None:
+                raise ValueError('Unknown shell')
+            func = getattr(self, os.path.basename(shell) + '_setup', None)
+            if func is None:
+                raise RuntimeError('Shell {} is not supported.'.format(shell))
+            else:
+                print(func(package, filename, '-r'))
+
+    def run(self):
+        """Read commands from stdin and output result to stdout."""
+        out = sys.stdout
+        try:
+            sys.stdout = sys.stderr
+            command = sys.stdin.readline()
+            while command:
+                try:
+                    print(
+                        (0 if self.handle(command) else 1),
+                        file=out, flush=True)
+                except SystemExit:
+                    print(0, file=out, flush=True)
+                    return
+                except Exception:
+                    traceback.print_exc()
+                    print(1, file=out, flush=True)
+                command = sys.stdin.readline()
+        finally:
+            sys.stdout = out
+
+    def handle(self, commandline):
+        """Handle a commandline.  Return True/False successful or not."""
+        parsed = shlex.split(commandline)
+        if parsed and os.path.isdir(parsed[0]) and parsed[0].startswith('/'):
+            os.chdir(parsed[0])
+            parsed = parsed[1:]
+        try:
+            args = self.parser.parse_args(parsed)
+        except SystemExit:
+            return ('-h' in parsed) or ('--help' in parsed)
+        for key, value in self.cache.items():
+            argval = getattr(args, key, None)
+            if argval is None:
+                setattr(args, key, value)
+        try:
+            return args.func(args)
+        finally:
+            for key, value in self.cache.items():
+                self.cache[key] = getattr(args, key, None)
