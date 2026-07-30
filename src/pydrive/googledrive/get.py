@@ -1,8 +1,10 @@
 """Get data.
 
 """
+import os
 from urllib import parse as urlparse
 from pydrive.util.response import Response
+from pydrive.util.dtree import DTree
 
 from .googledrive import api, Command
 
@@ -12,7 +14,7 @@ from .urls import FILE_URL
 class LS(Command):
     def __init__(self):
         self.parser = p = self.get_parser()
-        p.add_argument('name', help='target to ls', nargs='?')
+        p.add_argument('name', help='target to ls', nargs='?', default='.')
         p.add_argument('-c', '--corpora', default='user', choices=('user', 'domain', 'drive', 'allDrives'))
         p.add_argument('--all', action='store_true', help='include items from all drives')
         p.add_argument('-t', '--trash', action='store_true', help='include trashed items')
@@ -20,6 +22,7 @@ class LS(Command):
         p.add_argument('-v', '--verbose', action='store_true')
         p.add_argument('-l', '--longform', action='store_true', help='prints extra fields for the file.')
         p.add_argument('-f', '--force', action='store_true', help='force an api call instead of using cached data.')
+        p.add_argument('--tree', help=None, type=DTree, default=DTree())
         p.add_argument(
             '-o', '--order', nargs='*', default=['folder', 'name'],
             choices=(
@@ -56,16 +59,12 @@ class LS(Command):
         args.auth(response)
         return response
 
-    def __call__(self, args):
+
+    def _get_api(self, nodeid, args):
         if not args.auth:
             print('Not logged in.')
             return False
-
-        if args.name is None:
-            args.name = 'root'
-
-
-        qstr = ["'{}' in parents".format(args.name.replace("'", r'\'').replace('\\', r'\\'))]
+        qstr = ["'{}' in parents".format(nodeid.replace("'", r'\'').replace('\\', r'\\'))]
         if not args.trash:
             qstr.append('trashed = false')
 
@@ -107,3 +106,16 @@ class LS(Command):
                     print(Response(response))
                 print(response.headers)
                 return False
+
+    def display_node(self, node):
+        pass
+
+
+    def __call__(self, args):
+        if not args.force:
+            node = args.dtree.get(args.name)
+            if node is not None:
+                self.display_node(node)
+                return True
+        name = os.sep
+        for item in args.dtree.normpath(args.name).split(os.sep):
