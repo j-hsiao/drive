@@ -7,7 +7,7 @@ class DTree(object):
         self.folder_mimes = folder_mimes
         self.root = {'children': {}, 'id': rootid}
         self.items = {}
-        self.cwd = '/'
+        self.cwd = os.sep
         if initial is not None:
             if isinstance(initial, str):
                 try:
@@ -21,22 +21,25 @@ class DTree(object):
                 self.cwd = initial.cwd
                 self.folder_mimes = initial.folder_mimes
 
-    def normpath(self, path):
-        """Normalize path to absolute.
+    def getcwd(self):
+        return self.cwd
 
-        Converts to using / regardless of os.sep.
-        """
-        if path is None:
+    def normpath(self, path):
+        """Normalize path to absolute."""
+        if path is None or path == '.':
             return self.cwd
         path = os.path.normpath(path)
-        if os.sep != '/':
-            path = path.replace('\\', '/')
         if path.startswith(os.sep):
-        return os.path.normpath(os.path.join(self.cwd, path))
+            return path
+        return os.path.join(self.cwd, path)
 
     def cd(self, path):
         """Change cwd."""
-        self.cwd = self.normpath(path)
+        path = self.normpath(path)
+        if self.isdir(path):
+            self.cwd = path
+            return
+        raise ValueError('path is not a dir or is not loaded.')
 
     def get_(self, path, make=False):
         """Return an item from normalized path.
@@ -61,7 +64,7 @@ class DTree(object):
         return node
     def get(self, path, make=False):
         """Same as get_ but normalize path first."""
-        return self.get_(self.normpath(pathOrId), make)
+        return self.get_(self.normpath(path), make)
 
     def __getitem__(self, pathOrId):
         """Get node by id."""
@@ -73,11 +76,11 @@ class DTree(object):
 
     def isdir(self, nodeOrPath):
         """Check if node or path is a dir."""
-        if isinstance(node, str):
-            node = self.get(node)
-        return self.isdir_(node)
+        if isinstance(nodeOrPath, str):
+            nodeOrPath = self.get(nodeOrPath)
+        return self.isdir_(nodeOrPath)
 
-    def update(self, fobjs, parent='/'):
+    def update(self, fobjs, parent=None):
         """Update entries under parent.
 
         fobjs: sequence of dicts.
@@ -103,19 +106,26 @@ class DTree(object):
 
     def walk(self, path='.', sort=True):
         """Walk through all descendents of the given path."""
-        q = [(path, self.get(path))]
+        path = self.normpath(path)
+        q = [
+            (os.path.join(path, name), node)
+            for name, node in self.get_(path)['children'].items()
+        ]
+        if sort:
+            q.sort(reverse=True)
         while q:
             name, node = q.pop()
             if self.isdir_(node):
-                name += os.sep
+                if not name.endswith(os.sep):
+                    name += os.sep
                 yield name, node
                 children = node.get('children', {})
                 if sort:
                     children = list(children.items())
-                    children.sort(key=(lambda x: x[0]), reverse=True)
+                    children.sort(reverse=True)
                 else:
                     children = children.items()
                 for cname, child in children:
-                    q.append((name + cname, child))
+                    q.append((os.path.join(name, cname), child))
             else:
                 yield name, node
