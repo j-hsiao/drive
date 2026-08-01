@@ -6,6 +6,15 @@ import requests
 from pydrive.util.command import Commands, Command as _Command
 from pydrive.util.auth import Auth
 from pydrive.util import jutil
+from pydrive.util.dsearch import DSearch
+
+dsearch = DSearch(
+    [
+        '~/.config/pydrive/googledrive',
+        '~/.googledrive',
+        '~',
+    ]
+)
 
 
 api = Commands(['auth', 'app'])
