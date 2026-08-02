@@ -4,7 +4,6 @@
 import os
 from urllib import parse as urlparse
 from pydrive.util.response import Response
-from pydrive.util.dtree import DTree
 
 from .googledrive import api, Command
 
@@ -22,7 +21,6 @@ class LS(Command):
         p.add_argument('-v', '--verbose', action='store_true')
         p.add_argument('-l', '--longform', action='store_true', help='prints extra fields for the file.')
         p.add_argument('-f', '--force', action='store_true', help='force an api call instead of using cached data.')
-        p.add_argument('--tree', help=None, type=DTree, default=DTree())
         p.add_argument(
             '-o', '--order', nargs='*', default=['folder', 'name'],
             choices=(
