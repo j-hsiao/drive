@@ -1,11 +1,10 @@
-"""Search directories
-"""
+"""Search specific directoriesdirectories."""
 import glob
 import os
 
 class DSearch(object):
     def __init__(self, targets=('~/.config/pydrive', '~')):
-        self.targets = [os.path.expanduser(item) for item in targets]
+        self.targets = [os.path.expanduser(os.path.normpath(item)) for item in targets]
 
     def open(self, name, mode, cwd=None):
         """Return (created, fileobj).
@@ -27,29 +26,33 @@ class DSearch(object):
                 mode = 'w' + mode.replace('r', '+')
             return False, open(fname, mode)
 
-    def glob(self, globpat='*', cwd=None):
-        """Iterate globs for target directories.
+    def __call__(self, *globpats, **kwargs):
+        """Return glob matches in target directories
 
-        cwd: also search cwd.
+        kwargs:
+            extra: str|list, extra path(s) to search.  If there is overlap with
+                   self.targets, then the paths will be searched multiple times.
+            first: bool, return the first matching path.
         """
+        if not globpats:
+            globpats = ('*',)
         ret = []
-        if cwd:
-            ret.extend(glob.glob(os.path.join(cwd, globpat)))
-        if not globpat.startswith(os.sep):
-            for target in self.targets:
-                ret.extend(glob.glob(os.path.join(target, globpat)))
+        extra = kwargs.get('extra', ())
+        if isinstance(extra, str):
+            extra = [extra]
+        extra = [os.path.expanduser(os.path.normpath(_)) for _ in extra]
+        first = kwargs.get('first', False)
+        for globpat in globpats:
+            globpat = os.path.expanduser(os.path.normpath(globpat))
+            if globpat.startswith(os.sep):
+                ret.extend(glob.glob(globpat))
+                if first and ret:
+                    return ret[0]
+            else:
+                for dlist in [extra, self.targets]:
+                    for target in dlist:
+                        print('checking target', target)
+                        ret.extend(glob.glob(os.path.join(target, globpat)))
+                        if first and ret:
+                            return ret[0]
         return ret
-
-    def find(self, name, cwd=None):
-        """Return path for name.
-
-        Search through target directories for a matching name.
-        """
-        if cwd:
-            candidate = os.path.join(cwd, name)
-            if os.path.exists(candidate):
-                return candidate
-        for target in self.targets:
-            candidate = os.path.join(target, name)
-            if os.path.exists(candidate):
-                return candidate
