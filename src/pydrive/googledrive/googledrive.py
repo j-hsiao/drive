@@ -7,6 +7,7 @@ from pydrive.util.command import Commands, Command as _Command
 from pydrive.util.auth import Auth
 from pydrive.util import jutil
 from pydrive.util.dsearch import DSearch
+from pydrive.util.dtree import DTree
 
 dsearch = DSearch(
     [
@@ -16,10 +17,27 @@ dsearch = DSearch(
     ]
 )
 
+class AppInfo(jutil.JFile):
+    def _init(self, appjson=None, data=None):
+        if appjson is None:
+            appjson = dsearch('*app*.json', first=True)
+            if appjson is None:
+                raise ValueError('No app info found.')
+        super(AppInfo, self)._init(appjson, data)
+        if not self:
+            raise ValueError('No app info.')
 
-api = Commands(['auth', 'app'])
+
+api = Commands(['auth', 'app', 'dtree'])
 api.add_argument('-a', '--auth', type=Auth, help='saved auth file', nargs='?')
-api.add_argument('--app', type=jutil.JFile, help='registered app jsonfile', nargs='?')
+api.add_argument(
+    '--app', type=AppInfo, default={},
+    help='registered app jsonfile', nargs='?')
+api.add_argument(
+    '--dtree', help='',
+    default=DTree(),
+    type=DTree,
+)
 
 class Command(_Command):
     @staticmethod
