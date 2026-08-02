@@ -4,12 +4,23 @@ import os
 import uuid
 import traceback
 
-class JFile(dict):
-    def __init__(self, fname, data=None):
+from .copyable import Copyable
+
+class JFile(Copyable, dict):
+    def _init(self, fname, data=None):
         self.__fname = os.path.expanduser(fname)
         if data is None:
             data = self._load(self.__fname)
-        super(JFile, self).__init__(data)
+        super(Copyable, self).__init__(data)
+
+    def path(self):
+        return self.__fname
+
+    def _copy_instance(self, other, *args, **kwargs):
+        """Copy from another JFile."""
+        self.__fname = other.__fname
+        super(Copyable, self).__init__(other)
+
 
     def __repr__(self):
         return 'JFile({},{})'.format(repr(self.__fname), super(JFile, self).__repr__())
