@@ -55,4 +55,6 @@ class DSearch(object):
                         ret.extend(glob.glob(os.path.join(target, globpat)))
                         if first and ret:
                             return ret[0]
+        if first and not ret:
+            return None
         return ret
