@@ -55,7 +55,7 @@ class Commands(object):
     def check(args):
         print(args)
 
-    def add_extra(self, parser):
+    def add_arguments(self, parser):
         for args, kwargs in self._extraargs:
             parser.add_argument(*args, **kwargs)
 
@@ -88,7 +88,7 @@ class Commands(object):
                     parents=[p],
                     add_help=False,
                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-            self.add_extra(ret)
+            self.add_arguments(ret)
             return ret
 
     def bash_setup(self, package, filename=None, flags=()):

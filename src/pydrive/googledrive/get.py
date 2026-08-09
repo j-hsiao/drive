@@ -30,7 +30,7 @@ class LS(Command):
             ),
             help='List of items to order by'
         )
-        api.add_extra(p)
+        api.add_arguments(p)
 
     @staticmethod
     def parse_order(order):

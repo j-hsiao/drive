@@ -48,7 +48,7 @@ def metadata(name, mime=None, **kwargs):
 class Touch(Command):
     def __init__(self):
         self.parser = p = self.get_parser()
-        api.add_extra(p)
+        api.add_arguments(p)
         p.add_argument('name', help='name of file to create.')
         p.add_argument('-m', '--mime', help='mime type to use.')
 
@@ -68,7 +68,7 @@ class Touch(Command):
 class MkDir(Command):
     def __init__(self):
         self.parser = p = self.get_parser()
-        api.add_extra(p)
+        api.add_arguments(p)
         p.add_argument('dname', help='name of dir to name', nargs='+')
         p.add_argument('-p', help='make intermediate parent directories too.')
 
@@ -88,7 +88,7 @@ class MkDir(Command):
 class Upload(Command):
     def __init__(self):
         self.parser = p = self.get_parser()
-        api.add_extra(p)
+        api.add_arguments(p)
         p.add_argument('name', help='name of file to upload.')
         p.add_argument('out', help='target output name, default to basename of `name`', nargs='?')
         p.add_argument('-m', '--mime', help='mime type to use.')

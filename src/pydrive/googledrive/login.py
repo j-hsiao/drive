@@ -18,6 +18,7 @@ from pydrive.util import command
 from pydrive.util.pkce import PKCE
 from pydrive.util import winsockstdin
 from pydrive.util.response import Response
+from pydrive.util import webbrowserpatch
 from .googledrive import api, Command
 
 from .urls import TOKEN_URL, AUTH_URL
@@ -59,27 +60,6 @@ class LocalAuthServer(HTTPServer):
             return ''
 
 @api
-class Token(Command):
-    def __init__(self):
-        self.parser = p = self.get_parser()
-        p.add_argument('-o', '--output', help='save access token to a file.')
-        api.add_extra(p)
-
-    def __call__(self, args):
-        auth = getattr(args, 'auth', None)
-        if auth:
-            if args.output:
-                with open(args.output, 'w') as f:
-                    json.dump(auth.data, f, indent=4)
-                    f.write('\n')
-            else:
-                print(auth)
-            return True
-        return False
-
-
-
-@api
 class Login(Command):
     def __init__(self):
         self.parser = p = self.get_parser()
@@ -95,7 +75,7 @@ class Login(Command):
         p.add_argument(
             '--no-incremental', dest='incremental', action='store_false',
             help='Do not include previously granted scopes.')
-        api.add_extra(p)
+        api.add_arguments(p)
 
     def _find_default_app(self):
         print('Searching for google app info...')
