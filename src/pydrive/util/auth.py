@@ -10,6 +10,8 @@ from urllib import parse as urlparse
 
 from .hashing import b64encode, byteslike, strlike, b64sha256, hexdecode
 
+from . import jutil
+
 
 
 class Auth(object):
@@ -37,6 +39,10 @@ class Auth(object):
             self.data = {}
         else:
             raise ValueError('Bad value for Auth(): {}'.format(f))
+
+        if self.dpop is None and 'DPoP' in self.data:
+            self.dpop = DPoP(byteslike(self.data['DPoP']))
+
         try:
             # https://developers.google.com/identity/protocols/oauth2/web-server#exchange-authorization-code
             # "The type of token returned. This value is always Bearer, even when DPoP is used."
@@ -50,6 +56,9 @@ class Auth(object):
             traceback.print_exc()
             self.auth = ''
             self.dpop = None
+
+    def save(self, out):
+        jutil.save(self.data, out)
 
     def __contains__(self, scope):
         return str(self.Scope(scope)) in self.data.get('scope', '')
