@@ -38,3 +38,9 @@ tree.cd('a')
 assert tree.cwd == normed('/a')
 
 assert normed(list(name for name, info in tree.walk())) == normed(['/a/a', '/a/b', '/a/c'])
+
+assert str(tree) == '''  /
+*   a/
+      a
+      b
+      c'''

@@ -1,5 +1,6 @@
 import os
 import json
+from . import jutil
 
 class DTree(object):
     """Maintain a local structure of dirs/items."""
@@ -20,6 +21,30 @@ class DTree(object):
                 self.items = initial.items
                 self.cwd = initial.cwd
                 self.folder_mimes = initial.folder_mimes
+
+    def save(self, out, **kwargs):
+        jutil.save(self.root, out, **kwargs)
+
+
+    def __str__(self):
+        if self.cwd == os.sep:
+            parts = ['* ', os.sep]
+        else:
+            parts = ['  ', os.sep]
+
+        for name, node in self.walk('/'):
+            parts.append('\n')
+            if name.rstrip(os.sep) == self.cwd:
+                parts.append('* ')
+            else:
+                parts.append('  ')
+            split = name.strip(os.sep).split(os.sep)
+            for _ in range(len(split)):
+                parts.append('  ')
+            parts.append(split[-1])
+            if name.endswith(os.sep):
+                parts.append(os.sep)
+        return ''.join(parts)
 
     def getcwd(self):
         return self.cwd
@@ -104,28 +129,19 @@ class DTree(object):
             else:
                 self.items[childid] = child
 
-    def walk(self, path='.', sort=True):
+    def walk(self, path='.', sort=True, _node=None):
         """Walk through all descendents of the given path."""
-        path = self.normpath(path)
-        q = [
-            (os.path.join(path, name), node)
-            for name, node in self.get_(path)['children'].items()
-        ]
-        if sort:
-            q.sort(reverse=True)
-        while q:
-            name, node = q.pop()
-            if self.isdir_(node):
-                if not name.endswith(os.sep):
-                    name += os.sep
-                yield name, node
-                children = node.get('children', {})
-                if sort:
-                    children = list(children.items())
-                    children.sort(reverse=True)
-                else:
-                    children = children.items()
-                for cname, child in children:
-                    q.append((os.path.join(name, cname), child))
+        if _node is None:
+            path = self.normpath(path)
+            _node = self.get_(path)
+        else:
+            if self.isdir_(_node):
+                yield path + os.sep, _node
             else:
-                yield name, node
+                yield path, _node
+        items = _node.get('children', {}).items()
+        if sort:
+            items = sorted(items)
+        for cname, cnode in items:
+            for res in self.walk(os.path.join(path, cname), sort=sort, _node=cnode):
+                yield res
