@@ -1,3 +1,4 @@
+import contextlib
 import sys
 import json
 import os
@@ -5,6 +6,25 @@ import uuid
 import traceback
 
 from .copyable import Copyable
+
+def save(info, out, **kwargs):
+    with contextlib.ExitStack() as stack:
+        write = getattr(out, 'write')
+        if write is None:
+            dname = os.path.dirname(out)
+            if not os.path.isdir(dname):
+                try:
+                    os.makedirs(dname)
+                except Exception:
+                    traceback.print_exc()
+            out = stack.enter_context(open(out, 'w'))
+        kwargs.setdefault('indent', 4)
+        json.dump(info, out, **kwargs)
+        out.write('\n')
+
+
+
+
 
 class JFile(Copyable, dict):
     def _init(self, fname, data=None):
@@ -41,23 +61,17 @@ class JFile(Copyable, dict):
         """Load data."""
         self.clear()
         self.update(self._load(self.__fname))
-    def save(self, *args, **kwargs):
+
+    def save(self, fname=None, **kwargs):
         """Save data."""
+        if fname is None:
+            fname = self.__fname
         try:
-            with open(self.__fname, 'w') as f:
-                json.dump(self, f, *args, **kwargs)
+            save(self, fname, **kwargs)
         except Exception:
-            dname = os.path.dirname(self.__fname)
-            if not os.path.isdir(dname):
-                try:
-                    os.makedirs(dname)
-                except Exception:
-                    pass
-                if os.path.isdir(dname):
-                    self.save()
-                    return
             print('Error saving jfile', repr(self), file=sys.stderr)
             traceback.print_exc()
+
     def delete(self):
         """Delete the file."""
         try:
