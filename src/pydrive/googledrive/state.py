@@ -1,4 +1,4 @@
-from .googledrive import api, Command
+from .googledrive import api, Command, dsearch
 
 @api
 class State(Command):
@@ -15,8 +15,11 @@ class State(Command):
             print(target)
         if args.out is not None:
             if args.out:
-                target.save(args.out[0])
+                out = args.out[0]
             else:
-                outname = '' #TODO default name
-                target.save(outname)
+                # TODO the name
+                opened, out = dsearch.open('', 'w')
+                if not opened:
+                    raise OSError('Failed to open save target.')
+            target.save(out)
         return True
