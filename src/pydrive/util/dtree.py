@@ -1,26 +1,28 @@
 import os
 import json
 from . import jutil
+from . import listinit
 
-class DTree(object):
+class DTree(listinit.ListInit):
     """Maintain a local structure of dirs/items."""
-    def __init__(self, initial=None, rootid='root', folder_mimes=['application/vnd.google-apps.folder']):
+    def copy_instance(self, initial, *args, **kwargs):
+        self.root = kwargs.get('root', initial.root)
+        self.items = kwargs.get('items', initial.items)
+        self.cwd = kwargs.get('cwd', initial.cwd)
+        self.folder_mimes = kwargs.get('folder_mimes', initial.folder_mimes)
+
+
+    def _init(self, initial=None, rootid='root', folder_mimes=['application/vnd.google-apps.folder']):
         self.folder_mimes = folder_mimes
         self.root = {'children': {}, 'id': rootid}
         self.items = {}
         self.cwd = os.sep
-        if initial is not None:
-            if isinstance(initial, str):
-                try:
-                    with open(initial, 'r') as f:
-                        self.root = json.load(f)
-                except Exception:
-                    pass
-            elif isinstance(initial, DTree):
-                self.root = initial.root
-                self.items = initial.items
-                self.cwd = initial.cwd
-                self.folder_mimes = initial.folder_mimes
+        if isinstance(initial, str):
+            try:
+                with open(initial, 'r') as f:
+                    self.root = json.load(f)
+            except Exception:
+                pass
 
     def save(self, out, **kwargs):
         jutil.save(self.root, out, **kwargs)

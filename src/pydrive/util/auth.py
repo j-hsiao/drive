@@ -11,11 +11,14 @@ from urllib import parse as urlparse
 from .hashing import b64encode, byteslike, strlike, b64sha256, hexdecode
 
 from . import jutil
+from . import listinit
 
 
 
-class Auth(object):
-    def __init__(self, f, dpop=None):
+class Auth(ListInit):
+    def copy_instance(self, other, dpop=None):
+        return self._init(other.data, dpop)
+    def _init(self, f, dpop=None):
         self.dpop = dpop
         if isinstance(f, str):
             if os.path.exists(f):
@@ -56,6 +59,7 @@ class Auth(object):
             traceback.print_exc()
             self.auth = ''
             self.dpop = None
+        return True
 
     def save(self, out):
         jutil.save(self.data, out)

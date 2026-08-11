@@ -5,7 +5,7 @@ import os
 import uuid
 import traceback
 
-from .copyable import Copyable
+from .listinit import ListInit
 
 def save(info, out, **kwargs):
     with contextlib.ExitStack() as stack:
@@ -22,24 +22,21 @@ def save(info, out, **kwargs):
         json.dump(info, out, **kwargs)
         out.write('\n')
 
-
-
-
-
-class JFile(Copyable, dict):
+class JFile(ListInit, dict):
     def _init(self, fname, data=None):
         self.__fname = os.path.expanduser(fname)
         if data is None:
             data = self._load(self.__fname)
-        super(Copyable, self).__init__(data)
+        super(ListInit, self).__init__(data)
+        return True
 
     def path(self):
         return self.__fname
 
-    def _copy_instance(self, other, *args, **kwargs):
+    def copy_instance(self, other, *args, **kwargs):
         """Copy from another JFile."""
         self.__fname = other.__fname
-        super(Copyable, self).__init__(other)
+        super(ListInit, self).__init__(other)
 
 
     def __repr__(self):
