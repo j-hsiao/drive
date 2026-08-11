@@ -1,3 +1,4 @@
+import contextlib
 from .googledrive import api, Command, dsearch
 
 @api
@@ -10,16 +11,17 @@ class State(Command):
         api.add_extra(p)
 
     def __call__(self, args):
-        target = getattr(args, args.item)
+        target = getattr(args, args.info)
         if args.show:
             print(target)
         if args.out is not None:
-            if args.out:
-                out = args.out[0]
-            else:
-                # TODO the name
-                opened, out = dsearch.open('', 'w')
-                if not opened:
-                    raise OSError('Failed to open save target.')
-            target.save(out)
+            with contextlib.ExitStack() as stack:
+                if args.out:
+                    out = args.out[0]
+                else:
+                    opened, out = dsearch.open(args.info + '.json', 'w')
+                    if not opened:
+                        raise OSError('Failed to open save target.')
+                    stack.enter_context(out)
+                target.save(out)
         return True
