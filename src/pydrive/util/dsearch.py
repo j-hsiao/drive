@@ -4,27 +4,40 @@ import os
 
 class DSearch(object):
     def __init__(self, targets=('.', '~/.config/pydrive', '~')):
-        self.dirs = [os.path.expanduser(os.path.normpath(item)) for item in targets]
+        """Initialize DSearch.
 
-    def open(self, name, mode):
+        targets: list of target directories to search.
+        When creating new files, prefer the first non-relative target dir.
+        """
+        self.dirs = [os.path.expanduser(os.path.normpath(item)) for item in targets]
+        for item in self.dirs:
+            if item.startswith(os.sep):
+                self.prefdir = item
+                break
+        else:
+            self.prefdir=self.dirs[0]
+
+    def open(self, name, mode, force=False):
         """Return (created, fileobj).
 
         If not existing, then prioritize the 1st choice in self.dirs.
         """
         fname = self(name, first=True)
         if fname:
+            if not force and 'w' in mode:
+                raise ValueError('Overwriting {}'.format(repr(fname)))
             return True, open(fname, mode)
         else:
-            target = os.path.join(self.dirs[0], name)
+            target = os.path.join(self.prefdir, name)
             dname = os.path.dirname(target)
-            if not os.path.isdir(dname):
+            if dname and not os.path.isdir(dname):
                 try:
                     os.makedirs(dname)
                 except Exception:
                     pass
             if 'w' not in mode and 'a' not in mode:
                 mode = 'w' + mode.replace('r', '+')
-            return False, open(fname, mode)
+            return False, open(target, mode)
 
     def __call__(self, *globpats, **kwargs):
         """Return glob matches in target directories

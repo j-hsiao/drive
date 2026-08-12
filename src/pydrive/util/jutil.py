@@ -12,7 +12,7 @@ def save(info, out, **kwargs):
         write = getattr(out, 'write', None)
         if write is None:
             dname = os.path.dirname(out)
-            if not os.path.isdir(dname):
+            if dname and not os.path.isdir(dname):
                 try:
                     os.makedirs(dname)
                 except Exception:

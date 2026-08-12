@@ -67,6 +67,7 @@ class Commands(object):
     @staticmethod
     def check(args):
         print(args)
+        return True
 
     def add_arguments(self, parser):
         """Add extra arguments to the parser.

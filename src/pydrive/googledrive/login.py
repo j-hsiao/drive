@@ -77,22 +77,6 @@ class Login(Command):
             help='Do not include previously granted scopes.')
         api.add_arguments(p)
 
-    def _find_default_app(self):
-        print('Searching for google app info...')
-        checkdirs = list(filter(None, ('.', os.environ.get('HOME'))))
-        for dname in checkdirs:
-            candidate = os.path.join(dname, '.googleapp')
-            print('  searching for', candidate)
-            if os.path.isfile(candidate):
-                print('    found')
-                return candidate
-        for dname in checkdirs:
-            candidates = [k for k in os.listdir(dname) if 'googleapp' in k.lower()]
-            if candidates:
-                print('  found:', candidates[0])
-                return os.path.join(dname, candidates[0])
-        raise ValueError('No app info found.')
-
     def _get_qs(self, appdata, query, verbose, gui):
         with contextlib.ExitStack() as stack:
             server = stack.enter_context(LocalAuthServer())
@@ -145,8 +129,8 @@ class Login(Command):
             print('Already logged in.')
             return True
         if not args.app:
-            with open(self._find_default_app(), 'r') as f:
-                args.app = json.load(f)
+            print('App info missing.')
+            return False
 
         pkce = PKCE()
         for apptype, settings in args.app.items():

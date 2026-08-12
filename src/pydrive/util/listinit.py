@@ -20,9 +20,12 @@ class ListInit(object):
                 if getattr(self, item)(*args, **kwargs):
                     return
             except Exception:
-                errors.append(traceback.format_exc())
+                errors.append(item)
+                errors.append(':\n  ')
+                errors.append(traceback.format_exc().replace('\n', '\n  '))
+                errors.append('\n')
         else:
-            logging.error('ListInit Failed: %s %s\n%s', args, kwargs, '\n'.join(errors))
+            logging.error('ListInit Failed: %s %s\n%s', args, kwargs, ''.join(errors))
             raise ValueError('ListInit failed')
 
     def _init_selftype(self, other, *args, **kwargs):

@@ -18,7 +18,8 @@ from . import listinit
 class Auth(listinit.ListInit):
     def copy_instance(self, other, dpop=None):
         return self._init(other.data, dpop)
-    def _init(self, f, dpop=None):
+
+    def _init(self, f=None, dpop=None):
         self.dpop = dpop
         if isinstance(f, str):
             if os.path.exists(f):
@@ -56,7 +57,8 @@ class Auth(listinit.ListInit):
             if self.dpop:
                 self.data['DPoP'] = strlike(self.dpop.private())
         except Exception:
-            traceback.print_exc()
+            if self.data:
+                traceback.print_exc()
             self.auth = ''
             self.dpop = None
         return True

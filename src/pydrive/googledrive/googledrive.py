@@ -53,7 +53,7 @@ class DTree(DTree_):
 api = Commands(['auth', 'app', 'dtree'])
 api.add_argument(
     '--auth', type=Auth, nargs='?',
-    help='Saved auth file. Omit arg to search for default.')
+    help='Saved auth file. Omit arg to search for default.', init=True)
 api.add_argument(
     '--app', type=AppInfo, nargs='?', init=True,
     help='Registered app file.  Omit arg to search for default.')
