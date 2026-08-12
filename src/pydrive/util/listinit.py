@@ -1,4 +1,5 @@
 import logging
+import traceback
 lg = logging.getLogger(__name__)
 
 class ListInit(object):
@@ -13,14 +14,16 @@ class ListInit(object):
     ]
 
     def __init__(self, *args, **kwargs):
+        errors = []
         for item in self.initfuncs:
             try:
                 if getattr(self, item)(*args, **kwargs):
                     return
             except Exception:
-                lg.exception('Error during ListInit initialization.')
+                errors.append(traceback.format_exc())
         else:
-            raise ValueError('ListInit failed to init from {}, {}'.format(args, kwargs))
+            logging.error('ListInit Failed: %s %s\n%s', args, kwargs, '\n'.join(errors))
+            raise ValueError('ListInit failed')
 
     def _init_selftype(self, other, *args, **kwargs):
         if isinstance(other, type(self)):
