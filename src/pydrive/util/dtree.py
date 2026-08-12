@@ -23,6 +23,7 @@ class DTree(listinit.ListInit):
                     self.root = json.load(f)
             except Exception:
                 pass
+        return True
 
     def save(self, out, **kwargs):
         jutil.save(self.root, out, **kwargs)
