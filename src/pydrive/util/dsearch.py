@@ -3,19 +3,19 @@ import glob
 import os
 
 class DSearch(object):
-    def __init__(self, targets=('~/.config/pydrive', '~')):
-        self.targets = [os.path.expanduser(os.path.normpath(item)) for item in targets]
+    def __init__(self, targets=('.', '~/.config/pydrive', '~')):
+        self.dirs = [os.path.expanduser(os.path.normpath(item)) for item in targets]
 
-    def open(self, name, mode, cwd=None):
+    def open(self, name, mode):
         """Return (created, fileobj).
 
-        If not existing, then prioritize the 1st choice in self.targets.
+        If not existing, then prioritize the 1st choice in self.dirs.
         """
-        fname = self.find(name, cwd)
+        fname = self(name, first=True)
         if fname:
             return True, open(fname, mode)
         else:
-            target = os.path.join(self.targets[0], name)
+            target = os.path.join(self.dirs[0], name)
             dname = os.path.dirname(target)
             if not os.path.isdir(dname):
                 try:
@@ -30,17 +30,19 @@ class DSearch(object):
         """Return glob matches in target directories
 
         kwargs:
-            extra: str|list, extra path(s) to search.  If there is overlap with
-                   self.targets, then the paths will be searched multiple times.
-            first: bool, return the first matching path.
+            dirs: str|list, dirs to search. Default to self.dirs.
+            first: bool, return the first matching path or None.
         """
         if not globpats:
             globpats = ('*',)
         ret = []
-        extra = kwargs.get('extra', ())
-        if isinstance(extra, str):
-            extra = [extra]
-        extra = [os.path.expanduser(os.path.normpath(_)) for _ in extra]
+        dirs = kwargs.get('dirs', None)
+        if dirs is None:
+            dirs = self.dirs
+        else:
+            if isinstance(dirs, str):
+                dirs = [dirs]
+            dirs = [os.path.expanduser(os.path.normpath(_)) for _ in dirs]
         first = kwargs.get('first', False)
         for globpat in globpats:
             globpat = os.path.expanduser(os.path.normpath(globpat))
@@ -49,12 +51,10 @@ class DSearch(object):
                 if first and ret:
                     return ret[0]
             else:
-                for dlist in [extra, self.targets]:
-                    for target in dlist:
-                        print('checking target', target)
-                        ret.extend(glob.glob(os.path.join(target, globpat)))
-                        if first and ret:
-                            return ret[0]
+                for target in dirs:
+                    ret.extend(glob.glob(os.path.join(target, globpat)))
+                    if first and ret:
+                        return ret[0]
         if first and not ret:
             return None
         return ret
