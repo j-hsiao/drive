@@ -11,6 +11,7 @@ from pydrive.util.dtree import DTree as DTree_
 
 dsearch = DSearch(
     [
+        '.',
         '~/.config/pydrive/googledrive',
         '~/.googledrive',
         '~',
@@ -32,7 +33,7 @@ class AppInfo(jutil.JFile):
 
 class Auth(Auth_):
     initfuncs = ['_init_None'] + Auth_.initfuncs
-    def _init_None(self, f, *args, **kwargs):
+    def _init_None(self, f=None, *args, **kwargs):
         if f is None:
             return self._init(
                 dsearch('*auth*.json', first=True),
@@ -50,15 +51,15 @@ class DTree(DTree_):
 
 
 api = Commands(['auth', 'app', 'dtree'])
-api.add_argument('-a', '--auth', type=Auth, help='saved auth file', nargs='?')
 api.add_argument(
-    '--app', type=AppInfo, default={},
-    help='registered app jsonfile', nargs='?')
+    '--auth', type=Auth, nargs='?',
+    help='Saved auth file. Omit arg to search for default.')
 api.add_argument(
-    '--dtree', help='',
-    default=DTree(),
-    type=DTree,
-)
+    '--app', type=AppInfo, nargs='?', init=True,
+    help='Registered app file.  Omit arg to search for default.')
+api.add_argument(
+    '--dtree', type=DTree, nargs='?', init=True,
+    help='Saved dtree file. Omit arg to search for default.')
 
 class Command(_Command):
     @staticmethod
