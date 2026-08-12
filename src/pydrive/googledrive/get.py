@@ -2,6 +2,7 @@
 
 """
 import os
+import json
 from urllib import parse as urlparse
 from pydrive.util.response import Response
 
@@ -9,7 +10,110 @@ from .googledrive import api, Command
 
 from .urls import FILE_URL
 
+def parse_order(order):
+    items = []
+    for item in order:
+        if item == 'desc':
+            item[-1] = item[-1] + ' desc'
+        else:
+            items.append(item)
+    return ','.join(items)
+
+class GetCommand(Command):
+    def __init__(self):
+        self.parser = p = self.get_parser()
+        api.add_arguments(p)
+        p.add_argument('-c', '--corpora', default='user', choices=('user', 'domain', 'drive', 'allDrives'))
+        p.add_argument('--all', action='store_true', help='include items from all drives')
+        p.add_argument('-t', '--trash', action='store_true', help='include trashed items')
+        p.add_argument(
+            '--fields',
+            choices=('kind', 'id', 'name', 'mimeType', 'resourceKey'),
+            nargs='*',
+            default=['id', 'name', 'mimeType'],
+        )
+        p.add_argument('-v', '--verbose', action='store_true')
+
+    def qstr(self, args):
+        if not args.trash:
+            ['trashed = false']
+        return []
+
+    def getquery(self, args):
+        return [
+            ('corpora', args.corpora),
+            ('fields', 'files({}),nextPageToken,kind,incompleteSearch'.format(','.join(args.fields))),
+            ('orderBy', parse_order(args.order)),
+            ('q', ' and '.join(self.qstr(args))),
+        ]
+
+
+    def update_dtree(self, args, filemetas):
+        for item in filemetas:
+            print(json.dumps(item, indent=2))
+
+    def get_meta(self, args, query):
+        """Get metadata given query fields.
+
+        query: list of pairs of query str info for use with
+        urllib.parse.urlencode.
+
+        Return a list of dicts of file metadata.
+        If multiple pages, get all pages too.
+        For each item, also update args.dtree.
+        """
+        files = []
+        query = list(query)
+        result = {'incompleteSearch': True}
+        try:
+            while result.get('incompleteSearch'):
+                url = '?'.join([FILE_URL, urlparse.urlencode(query)])
+                if args.verbose:
+                    print('GET', url)
+                response = self.session(args).get(
+                    url, headers=args.auth({}, url, htm='get'))
+                args.auth(response)
+                if args.verbose:
+                    print(Response(response))
+                if 200 <= response.status_code < 300:
+                    result = response.json()
+                    files.extend(result['files'])
+                    if result.get('kind', 'drive#fileList') != 'drive#fileList':
+                        print(
+                            'WARNING, response "kind" is unexpected. Got',
+                            result['kind'], 'expected drive#fileList')
+                    nextpage = result.get('nextPageToken', None)
+                    if nextpage:
+                        if query and query[-1][0] == 'nextPageToken':
+                            query[-1] = ('nextPageToken', nextpage)
+                        else:
+                            query.append(('nextPageToken', nextpage))
+                else:
+                    if not args.verbose:
+                        print(Response(response))
+                    print(response.headers)
+                    return files
+            return files
+        finally:
+            self.update_dtree(args, files)
+
 @api
+class Sync(GetCommand):
+    def __call__(self, args):
+        if not args.auth:
+            print('Not logged in.')
+            return False
+        files = self.get_meta(args, self.getquery(args))
+        return True
+
+# @api
+# class CD(Command):
+#     def __init__(self):
+#         self.parser = p = self.get_parser()
+#         p.add_argument('name', help='dir to cd to.')
+#         api.add_arguments(p)
+
+# @api
 class LS(Command):
     def __init__(self):
         self.parser = p = self.get_parser()
@@ -31,16 +135,6 @@ class LS(Command):
             help='List of items to order by'
         )
         api.add_arguments(p)
-
-    @staticmethod
-    def parse_order(order):
-        items = []
-        for item in order:
-            if item == 'desc':
-                item[-1] = item[-1] + ' desc'
-            else:
-                items.append(item)
-        return ','.join(items)
 
     def _get(self, args, query, pageToken=None):
         if pageToken:
@@ -70,7 +164,7 @@ class LS(Command):
             ('corpora', args.corpora),
             ('q', ' and '.join(qstr)),
             ('fields', 'files({}),nextPageToken,kind,incompleteSearch'.format(args.fields)),
-            ('orderBy', self.parse_order(args.order)),
+            ('orderBy', parse_order(args.order)),
         ]
         if args.all:
             query.append(('includeItemsFromAllDrives', 'true'))
@@ -117,3 +211,4 @@ class LS(Command):
                 return True
         name = os.sep
         for item in args.dtree.normpath(args.name).split(os.sep):
+            pass
