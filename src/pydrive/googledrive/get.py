@@ -1,5 +1,9 @@
 """Get data.
 
+Files(fields):
+    https://developers.google.com/workspace/drive/api/reference/rest/v3/files#File
+
+
 """
 import os
 import json
@@ -20,6 +24,7 @@ def parse_order(order):
     return ','.join(items)
 
 class GetCommand(Command):
+    DEFAULT_FIELDS = ['id', 'name', 'mimeType', 'parents']
     def __init__(self):
         self.parser = p = self.get_parser()
         api.add_arguments(p)
@@ -27,10 +32,40 @@ class GetCommand(Command):
         p.add_argument('--all', action='store_true', help='include items from all drives')
         p.add_argument('-t', '--trash', action='store_true', help='include trashed items')
         p.add_argument(
+            '-o', '--order', nargs='*', default=['folder', 'name'],
+            choices=(
+                'createdTime', 'folder', 'modifiedByMeTime', 'modifiedTime',
+                'name', 'name_natural', 'quotaBytesUsed', 'recency',
+                'sharedWithMeTime', 'starred', 'viewedByMeTime', 'desc'
+            ),
+            help='List of items to order by'
+        )
+        p.add_argument(
             '--fields',
-            choices=('kind', 'id', 'name', 'mimeType', 'resourceKey'),
-            nargs='*',
-            default=['id', 'name', 'mimeType'],
+            choices=(
+                'kind', 'parents', 'id', 'name',
+                'md5Checksum', 'sha1Checksum', 'sha256Checksum',
+                'driveId', 'fileExtension', 'copyRequiresWriterPermission',
+                'contentHints', 'writersCanShare', 'viewedByMe', 'mimeType',
+                'exportLinks', 'thumbnailLink', 'iconLink', 'shared',
+                'lastModifyingUser', 'owners', 'headRevisionId', 'sharingUser',
+                'webViewLink', 'webContentLink', 'size',
+                'viewersCanCopyContent', 'permissions', 'hasThumbnail',
+                'spaces', 'folderColorRgb', 'description', 'starred',
+                'trashed', 'explicitlyTrashed', 'createdTime', 'modifiedTime',
+                'modifiedByMeTime', 'viewedByMeTime', 'sharedWithMeTime',
+                'quotaBytesUsed', 'version', 'originalFilename', 'ownedByMe',
+                'fullFileExtension', 'properties', 'appProperties',
+                'isAppAuthorized', 'teamDriveId', 'capabilities',
+                'hasAugmentedPermissions', 'trashingUser', 'thumbnailVersion',
+                'trashedTime', 'modifiedByMe', 'permissionIds',
+                'imageMediaMetadata', 'videoMediaMetadata', 'shortcutDetails',
+                'contentRestrictions', 'resourceKey', 'linkShareMetadata',
+                'labelInfo', 'inheritedPermissionsDisabled',
+                'downloadRestrictions', 'clientEncryptionDetails',
+            ),
+            nargs='*', default=self.DEFAULT_FIELDS,
+            help='desired file metadata.',
         )
         p.add_argument('-v', '--verbose', action='store_true')
 
@@ -115,6 +150,7 @@ class Sync(GetCommand):
 
 # @api
 class LS(Command):
+    DEFAULT_FIELDS = ['id', 'name', 'mimeType', 'parents']
     def __init__(self):
         self.parser = p = self.get_parser()
         p.add_argument('name', help='target to ls', nargs='?', default='.')

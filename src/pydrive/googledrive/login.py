@@ -105,7 +105,7 @@ class Login(Command):
             while 1:
                 if gui:
                     r.update()
-                for key, mask in sel.select(1):
+                for key, mask in sel.select(.1):
                     if verbose:
                         print('selected!:', key, key.fileobj)
                     if key.fileobj is server:

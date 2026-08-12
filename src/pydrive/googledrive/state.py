@@ -14,6 +14,7 @@ class State(Command):
     def __call__(self, args):
         target = getattr(args, args.info)
         if args.show:
+            print('valid:', bool(target))
             print(target)
         if args.out is not None:
             with contextlib.ExitStack() as stack:
