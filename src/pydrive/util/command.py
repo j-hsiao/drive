@@ -149,7 +149,7 @@ class Commands(object):
             commandline.extend(flags)
         script = textwrap.dedent(r'''
             {COMMANDNAME}() {{
-                if ! declare -p __PY_{COMMANDNAME}__ &>/dev/null
+                if ! declare -p __PYDRIVE_{COMMANDNAME}__ &>/dev/null
                 then
                     if [[ "${{*}}" = exit ]]
                     then
