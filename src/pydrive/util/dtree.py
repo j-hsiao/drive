@@ -11,12 +11,14 @@ class DTree(listinit.ListInit):
         self.cwd = kwargs.get('cwd', initial.cwd)
         self.folder_mimes = kwargs.get('folder_mimes', initial.folder_mimes)
 
-
     def _init(self, initial=None, rootid='root', folder_mimes=['application/vnd.google-apps.folder']):
         self.folder_mimes = folder_mimes
         self.root = {'children': {}, 'id': rootid}
         self.items = {}
         self.cwd = os.sep
+        for name, node in self.walk('/'):
+            self.items[node['id']] = node
+            self.items[name] = node
         if isinstance(initial, str):
             try:
                 with open(initial, 'r') as f:
@@ -27,7 +29,6 @@ class DTree(listinit.ListInit):
 
     def save(self, out, **kwargs):
         jutil.save(self.root, out, **kwargs)
-
 
     def __str__(self):
         if self.cwd == os.sep:
@@ -75,6 +76,10 @@ class DTree(listinit.ListInit):
         make: node and intermediates if not found.
               Otherwise, return None if not found.
         """
+        try:
+            return self.items[path]
+        except KeyError:
+            pass
         node = self.root
         for item in filter(None, self.normpath(path).split(os.sep)):
             try:
@@ -93,10 +98,12 @@ class DTree(listinit.ListInit):
     def get(self, path, make=False):
         """Same as get_ but normalize path first."""
         return self.get_(self.normpath(path), make)
-
     def __getitem__(self, pathOrId):
         """Get node by id."""
-        return self.items[pathOrId]
+        ret = self.get(pathOrId)
+        if ret is None:
+            raise KeyError(str(pathOrId))
+        return ret
 
     def isdir_(self, node):
         """Check of node (dict) is a dir."""
