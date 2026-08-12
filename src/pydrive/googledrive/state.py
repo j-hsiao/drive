@@ -8,7 +8,8 @@ class State(Command):
         p.add_argument('info', choices=['app', 'auth', 'dtree'])
         p.add_argument('-s', '--show', action='store_true')
         p.add_argument('-o', '--out', help='save to an output location', nargs='*')
-        api.add_extra(p)
+        p.add_argument('-f', '--force', action='store_true')
+        api.add_arguments(p)
 
     def __call__(self, args):
         target = getattr(args, args.info)
@@ -19,9 +20,10 @@ class State(Command):
                 if args.out:
                     out = args.out[0]
                 else:
-                    opened, out = dsearch.open(args.info + '.json', 'w')
-                    if not opened:
-                        raise OSError('Failed to open save target.')
-                    stack.enter_context(out)
+                    out = stack.enter_context(
+                        dsearch.open(args.info + '.json', 'w', force=args.force)[1])
+                name = getattr(out, 'name', None)
+                if name:
+                    print('saving to', repr(name))
                 target.save(out)
         return True
