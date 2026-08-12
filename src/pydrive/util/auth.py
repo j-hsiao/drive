@@ -15,7 +15,7 @@ from . import listinit
 
 
 
-class Auth(ListInit):
+class Auth(listinit.ListInit):
     def copy_instance(self, other, dpop=None):
         return self._init(other.data, dpop)
     def _init(self, f, dpop=None):

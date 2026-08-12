@@ -21,6 +21,15 @@ class Exit(Command):
     def __call__(self, args):
         sys.exit()
 
+def py_include_path(package, filename):
+    """Calculate the python include dir to import filename."""
+    if package:
+        reps = len(package.split('.'))
+    else:
+        reps = 0
+    dname = os.path.dirname(filename)
+    return os.path.normpath(os.path.join(dname, *(['..'] * reps)))
+
 class Commands(object):
     """Manage commands."""
     def __init__(self, *caches, **kwargs):
@@ -67,7 +76,12 @@ class Commands(object):
         arguments must be placed before the subparser command.
         """
         for args, kwargs in self._extraargs:
-            parser.add_argument(*args, **kwargs)
+            if isinstance(parser, type(self)):
+                parser.add_argument(*args, **kwargs)
+            else:
+                kwargs = kwargs.copy()
+                kwargs.pop('init', None)
+                parser.add_argument(*args, **kwargs)
 
     def add_argument(self, *args, **kwargs):
         """Add generic arguments for the toplevel parser.
@@ -75,7 +89,7 @@ class Commands(object):
         Extra kwarg "init" to initialize with type() if was parsed as None.
         """
         self._extraargs.append((args, kwargs.copy()))
-        init = kwargs.pop('init', False):
+        init = kwargs.pop('init', False)
         ret = self.parser.add_argument(*args, **kwargs)
         if init:
             self._noneinit[ret.dest] = ret.type
@@ -109,7 +123,9 @@ class Commands(object):
             self.add_arguments(ret)
             return ret
 
-    def bash_setup(self, package, filename=None, flags=()):
+
+
+    def bash_setup(self, package, filename=None, flags=(), command='drive'):
         """Return a bash script to create a "drive" command to access drive apis.
 
         package: the __package__ for the __main__.py  The package should be run as __main__
@@ -118,20 +134,17 @@ class Commands(object):
                   if applicable.
         flags: sequence of str flags or single str flag to actually run.
         """
-        command = []
+        commandline = []
         if filename is not None:
-            os.path.dirname(filename)
-            drivepath = os.path.join(
-                os.path.dirname(filename),
-                *['..' for _ in package.split('.')])
+            drivepath = py_include_path(package, filename)
             pypath = os.environ.get('PYTHONPATH', None)
             if pypath:
-                pypath = os.pathsep.join([os.path.normpath(drivepath), pypath])
+                pypath = os.pathsep.join([drivepath, pypath])
             else:
                 pypath = drivepath
-            command.append('PYTHONPATH=' + pypath)
+            commandline.append('PYTHONPATH=' + pypath)
         script = textwrap.dedent(r'''
-            gdrive() {{
+            {COMMANDNAME}() {{
                 if ! declare -p __PY_GOOGLEDRIVE__ &>/dev/null
                 then
                     if [[ "${{*}}" = exit ]]
@@ -139,7 +152,7 @@ class Commands(object):
                         echo "Google Drive not active."
                         return
                     fi
-                    coproc __PY_GOOGLEDRIVE__ {{ {COMMAND} ;}}
+                    coproc __PY_GOOGLEDRIVE__ {{ {COMMANDLINE} ;}}
                 fi
                 local fds=("${{__PY_GOOGLEDRIVE__[@]}}")
                 local result
@@ -159,7 +172,7 @@ class Commands(object):
                 [[ "${{*}}" = exit ]] && wait "${{__PY_GOOGLEDRIVE___PID}}"
                 return "${{result:-1}}"
             }}
-            __drive_completer() {{
+            __{COMMANDNAME}_completer() {{
                 COMPREPLY=()
                 if ((${{COMP_CWORD}} == 1))
                 then
@@ -173,21 +186,23 @@ class Commands(object):
                     done
                 fi
             }}
-            complete -F __drive_completer -o filenames -o default -o bashdefault gdrive
+            complete -F __{COMMANDNAME}_completer -o filenames -o default -o bashdefault {COMMANDNAME}
             ''')
-        command.extend([sys.executable, '-m', package])
+        commandline.extend([sys.executable, '-m', package])
         if isinstance(flags, str):
-            command.append(flags)
+            commandline.append(flags)
         else:
-            command.extend(flags)
+            commandline.extend(flags)
         return script.format(
             CHOICES=shlex.join(self.sub.choices),
-            COMMAND=shlex.join(command),
+            COMMANDLINE=shlex.join(commandline),
+            COMMANDNAME=command,
         )
 
     def main(self, package, filename=None):
         p = argparse.ArgumentParser()
         p.add_argument('-r', '--run', action='store_true')
+        p.add_argument('-c', '--command', default='drive')
         args = p.parse_args()
         if args.run:
             self.run()
@@ -199,7 +214,7 @@ class Commands(object):
             if func is None:
                 raise RuntimeError('Shell {} is not supported.'.format(shell))
             else:
-                print(func(package, filename, '-r'))
+                print(func(package, filename, '-r', command=args.command))
 
     def run(self):
         """Read commands from stdin and output result to stdout."""
