@@ -9,7 +9,7 @@ from .listinit import ListInit
 
 def save(info, out, **kwargs):
     with contextlib.ExitStack() as stack:
-        write = getattr(out, 'write')
+        write = getattr(out, 'write', None)
         if write is None:
             dname = os.path.dirname(out)
             if not os.path.isdir(dname):
@@ -51,7 +51,6 @@ class JFile(ListInit, dict):
             with open(fname, 'r') as f:
                 return json.load(f)
         except Exception:
-            traceback.print_exc()
             return {}
 
     def load(self):
