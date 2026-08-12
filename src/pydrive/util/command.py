@@ -26,7 +26,8 @@ class Commands(object):
     def __init__(self, *caches, **kwargs):
         """Initialize Commands.
 
-        cache: a dict of cached values or a list of keys to cache.
+        cache: dict(s) of cached values, list(s) of cache names (init to None)
+               or str (same as list, but only 1 value).
         Cache will track the most recent non-None value for the
         given keys.
 
@@ -36,11 +37,14 @@ class Commands(object):
         self.parser.set_defaults(func=self.check)
         self.sub = p.add_subparsers()
         self.cache = {}
+        self._noneinit = {}
         for cache in caches:
             if not cache:
                 continue
             elif isinstance(cache, dict):
                 self.cache.update(cache)
+            elif isinstance(cache, str):
+                self.cache[cache] = None
             else:
                 try:
                     for _ in cache:
@@ -56,12 +60,26 @@ class Commands(object):
         print(args)
 
     def add_arguments(self, parser):
+        """Add extra arguments to the parser.
+
+        This allows the generic arguments to apply for the input parser,
+        which is usually a subparser.  Without this call, then the generic
+        arguments must be placed before the subparser command.
+        """
         for args, kwargs in self._extraargs:
             parser.add_argument(*args, **kwargs)
 
     def add_argument(self, *args, **kwargs):
-        self._extraargs.append((args, kwargs))
-        return self.parser.add_argument(*args, **kwargs)
+        """Add generic arguments for the toplevel parser.
+
+        Extra kwarg "init" to initialize with type() if was parsed as None.
+        """
+        self._extraargs.append((args, kwargs.copy()))
+        init = kwargs.pop('init', False):
+        ret = self.parser.add_argument(*args, **kwargs)
+        if init:
+            self._noneinit[ret.dest] = ret.type
+        return ret
 
     def __call__(self, *args, **kwargs):
         """Decorate or copy.
@@ -218,6 +236,9 @@ class Commands(object):
             argval = getattr(args, key, None)
             if argval is None:
                 setattr(args, key, value)
+        for k, tp in self._noneinit.items():
+            if getattr(args, k, None) is None:
+                setattr(args, k, tp())
         try:
             return args.func(args)
         finally:
