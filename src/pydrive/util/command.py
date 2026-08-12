@@ -75,12 +75,11 @@ class Commands(object):
         which is usually a subparser.  Without this call, then the generic
         arguments must be placed before the subparser command.
         """
-        for args, kwargs in self._extraargs:
-            if isinstance(parser, type(self)):
-                parser.add_argument(*args, **kwargs)
-            else:
-                kwargs = kwargs.copy()
-                kwargs.pop('init', None)
+        if isinstance(parser, type(self)):
+            for args, kwargs, init in self._extraargs:
+                parser.add_argument(*args, init=init, **kwargs)
+        else:
+            for args, kwargs, init in self._extraargs:
                 parser.add_argument(*args, **kwargs)
 
     def add_argument(self, *args, **kwargs):
@@ -88,10 +87,9 @@ class Commands(object):
 
         Extra kwarg "init" to initialize with type() if was parsed as None.
         """
-        self._extraargs.append((args, kwargs.copy()))
-        init = kwargs.pop('init', False)
+        self._extraargs.append((args, kwargs, kwargs.pop('init', False)))
         ret = self.parser.add_argument(*args, **kwargs)
-        if init:
+        if self._extraargs[-1][2]:
             self._noneinit[ret.dest] = ret.type
         return ret
 
@@ -143,18 +141,23 @@ class Commands(object):
             else:
                 pypath = drivepath
             commandline.append('PYTHONPATH=' + pypath)
+        commandline.extend([sys.executable, '-m', package])
+        if isinstance(flags, str):
+            commandline.append(flags)
+        else:
+            commandline.extend(flags)
         script = textwrap.dedent(r'''
             {COMMANDNAME}() {{
-                if ! declare -p __PY_GOOGLEDRIVE__ &>/dev/null
+                if ! declare -p __PY_{COMMANDNAME}__ &>/dev/null
                 then
                     if [[ "${{*}}" = exit ]]
                     then
-                        echo "Google Drive not active."
+                        echo "{COMMANDNAME}: drive not active."
                         return
                     fi
-                    coproc __PY_GOOGLEDRIVE__ {{ {COMMANDLINE} ;}}
+                    coproc __PYDRIVE_{COMMANDNAME}__ {{ {COMMANDLINE} ;}}
                 fi
-                local fds=("${{__PY_GOOGLEDRIVE__[@]}}")
+                local fds=("${{__PYDRIVE_{COMMANDNAME}__[@]}}")
                 local result
                 trap 'return' SIGPIPE
                 trap 'trap - RETURN SIGPIPE' RETURN
@@ -169,7 +172,7 @@ class Commands(object):
                         fi
                     done
                 }} >&${{fds[1]}}
-                [[ "${{*}}" = exit ]] && wait "${{__PY_GOOGLEDRIVE___PID}}"
+                [[ "${{*}}" = exit ]] && wait "${{__PYDRIVE_{COMMANDNAME}___PID}}"
                 return "${{result:-1}}"
             }}
             __{COMMANDNAME}_completer() {{
@@ -188,11 +191,6 @@ class Commands(object):
             }}
             complete -F __{COMMANDNAME}_completer -o filenames -o default -o bashdefault {COMMANDNAME}
             ''')
-        commandline.extend([sys.executable, '-m', package])
-        if isinstance(flags, str):
-            commandline.append(flags)
-        else:
-            commandline.extend(flags)
         return script.format(
             CHOICES=shlex.join(self.sub.choices),
             COMMANDLINE=shlex.join(commandline),
