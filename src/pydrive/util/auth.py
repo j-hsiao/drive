@@ -61,6 +61,9 @@ class Auth(listinit.ListInit):
                 traceback.print_exc()
             self.auth = ''
             self.dpop = None
+
+        if self.data.get('expired') is None and self.data.get('expires_in', None) is not None:
+            self.data['expired'] = time.time() + self.data.get('expires_in')
         return True
 
     def save(self, out):
@@ -79,8 +82,13 @@ class Auth(listinit.ListInit):
 
     def __getitem__(self, k):
         return self.data[k]
+    def get(self, k, default=None):
+        return self.data.get(k, default)
 
     def __bool__(self):
+        if self.data.get('expired'):
+            if self.data['expired'] < time.time():
+                return False
         return bool(self.auth)
 
     def __call__(self, headers, *args, **kwargs):
