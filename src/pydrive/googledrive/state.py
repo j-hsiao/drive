@@ -13,7 +13,7 @@ class State(Command):
 
     def __call__(self, args):
         target = getattr(args, args.info)
-        if args.show:
+        if args.show or args.out is None:
             print('valid:', bool(target))
             print(target)
         if args.out is not None:

@@ -82,10 +82,9 @@ class GetCommand(Command):
             ('q', ' and '.join(self.qstr(args))),
         ]
 
-
     def update_dtree(self, args, filemetas):
-        for item in filemetas:
-            print(json.dumps(item, indent=2))
+        # TODO
+        print(json.dumps(filemetas, indent=2))
 
     def get_meta(self, args, query):
         """Get metadata given query fields.
