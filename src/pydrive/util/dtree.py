@@ -1,3 +1,4 @@
+"""A tree structure of file nodes."""
 import os
 import json
 from . import jutil
@@ -5,29 +6,67 @@ from . import listinit
 
 class DTree(listinit.ListInit):
     """Maintain a local structure of dirs/items."""
-    def copy_instance(self, initial, *args, **kwargs):
-        self.root = kwargs.get('root', initial.root)
-        self.items = kwargs.get('items', initial.items)
-        self.cwd = kwargs.get('cwd', initial.cwd)
-        self.folder_mimes = kwargs.get('folder_mimes', initial.folder_mimes)
+    @staticmethod
+    def parse_flat(files, parkey='parents', idkey='id', namekey='name'):
+        """Parse files into a tree structure.
 
-    def _init(self, initial=None, rootid='root', folder_mimes=['application/vnd.google-apps.folder']):
+        files: list of file info (dict)
+        parkey: key into each file for (list of) parent(s)
+        idkey: Key to identifying info in parents key.
+        namekey: key for name of the the file.
+        """
+        lut = {}
+        roots = []
+        for item in files:
+            lut[item[idkey]] = item.copy()
+            if parkey not in item:
+                roots.append(lut[item[idkey]])
+        for item in list(lut.values()):
+            try:
+                parents = item[parkey]
+            except KeyError:
+                pass
+            if isinstance(parents, str):
+                parents = [parents]
+            name = item[namekey]
+            for parent in parents:
+                try:
+                    node = lut[parent]
+                except KeyError:
+                    node = lut[parent] = {'children': {}, idkey: parent, namekey: ''}
+                    roots.append(node)
+                try:
+                    children = node['children']
+                except KeyError:
+                    children = node['children'] = {}
+                children[item[namekey]] = item
+        return roots
+
+    def copy_instance(self, initial, *args, **kwargs):
+        # should this be deep copy?
+        for attr in ('root', 'items', 'cwd', 'folder_mimes'):
+            setattr(self, kwargs.get(attr, getattr(initial, attr)))
+
+    def _init(self, initial=None, rootid='root', folder_mimes=['application/vnd.google-apps.folder'], **kwargs):
+        """Initialize DTree.
+
+        initial: Dtree initializer.  Another Dtree to copy or a filepath."""
         self.folder_mimes = folder_mimes
-        self.root = {'children': {}, 'id': rootid}
-        self.items = {}
-        self.cwd = os.sep
-        for name, node in self.walk('/'):
-            self.items[node['id']] = node
-            self.items[name] = node
         if isinstance(initial, str):
             try:
                 with open(initial, 'r') as f:
                     self.root = json.load(f)
             except Exception:
                 pass
+        elif hasattr(initial, 'read'):
+            self.root = json.load(f)
+        else:
+            self.root = {'children': {}, 'id': rootid}
+        self.cwd = os.sep
         return True
 
     def save(self, out, **kwargs):
+        """Save to out."""
         jutil.save(self.root, out, **kwargs)
 
     def __str__(self):
@@ -70,49 +109,44 @@ class DTree(listinit.ListInit):
             return
         raise ValueError('path is not a dir or is not loaded.')
 
-    def get_(self, path, make=False):
+    def get_(self, path, default=None, make=False):
         """Return an item from normalized path.
 
+        path: a normalized path via self.normpath.
         make: node and intermediates if not found.
               Otherwise, return None if not found.
         """
-        try:
-            return self.items[path]
-        except KeyError:
-            pass
         node = self.root
-        for item in filter(None, self.normpath(path).split(os.sep)):
+        for item in filter(None, path.split(os.sep)):
             try:
                 children = node['children']
             except KeyError:
                 if not make:
-                    return None
+                    return default
                 children = node['children'] = {}
             try:
                 node = children[item]
             except KeyError:
                 if not make:
-                    return None
+                    return default
                 node = children[item] = {}
         return node
-    def get(self, path, make=False):
+    def get(self, path, default=None, make=False):
         """Same as get_ but normalize path first."""
-        return self.get_(self.normpath(path), make)
-    def __getitem__(self, pathOrId):
-        """Get node by id."""
-        ret = self.get(pathOrId)
+        return self.get_(self.normpath(path), default, make)
+    def __getitem__(self, path):
+        ret = self.get(path)
         if ret is None:
-            raise KeyError(str(pathOrId))
+            raise KeyError(path)
         return ret
 
     def isdir_(self, node):
-        """Check of node (dict) is a dir."""
-        return ('children' in node) or (node.get('mimeType', '') in self.folder_mimes)
-
+        """Check if node (dict) is a dir."""
+        return ('children' in node) or (node.get('mimeType') in self.folder_mimes)
     def isdir(self, nodeOrPath):
         """Check if node or path is a dir."""
         if isinstance(nodeOrPath, str):
-            nodeOrPath = self.get(nodeOrPath)
+            nodeOrPath = self[nodeOrPath]
         return self.isdir_(nodeOrPath)
 
     def update(self, fobjs, parent=None):
@@ -120,9 +154,8 @@ class DTree(listinit.ListInit):
 
         fobjs: sequence of dicts.
                'name' is required.
-               'id' is expected.
         """
-        parent = self.get(parent, True)
+        parent = self.get(parent, make=True)
         children = parent.setdefault('children', {})
         for item in fobjs:
             name = item['name']
