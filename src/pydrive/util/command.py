@@ -152,28 +152,55 @@ class Commands(object):
         script = textwrap.dedent(r'''
             {PYDRIVE_READ}
             {COMMANDNAME}() {{
-                if ! declare -p __PYDRIVE_{COMMANDNAME}__ &>/dev/null
+                local BASE=__PYDRIVE_{COMMANDNAME}__
+                local PID="${{BASE}}_PID"
+                local FDS="${{BASE}}_FDS"
+                local -n pfd="${{BASE}}"
+                local -n fds="${{FDS}}"
+
+                if ! declare -p "${{BASE}}" &>/dev/null
                 then
+                    if declare -p "${{FDS}}" &>/dev/null
+                    then
+                        exec {{fds[0]}}<&- {{fds[1]}}<&-
+                        unset "${{FDS}}"
+                    fi
+
                     if [[ "${{*}}" = exit ]]
                     then
                         echo "{COMMANDNAME}: drive not active."
                         return
                     fi
-                    coproc __PYDRIVE_{COMMANDNAME}__ {{ {COMMANDLINE} ;}}
+                    coproc "${{BASE}}" {{ {COMMANDLINE} ;}}
+                    # Recreate coproc fds because ?coproc fds are not inheritable?
+                    # so using drive in a pipe leads to "invalid file descriptor"
+                    fds=()
+                    exec {{fds[0]}}<&${{pfd[0]}} {{fds[1]}}>&${{pfd[1]}}
                 fi
-                local fds=("${{__PYDRIVE_{COMMANDNAME}__[@]}}")
-                trap 'return' SIGPIPE
+                trap '
+                    if declare -p "${{BASE}}" &>/dev/null
+                    then
+                        wait "${{!PID}}"
+                        unset "${{BASE}}" "${{PID}}"
+                    fi
+                    if declare -p "${{FDS}}" &>/dev/null
+                    then
+                        exec {{fds[0]}}<&- {{fds[1]}}<&-
+                        unset "${{FDS}}"
+                    fi
+                    return
+                    ' SIGPIPE
                 trap 'trap - RETURN SIGPIPE' RETURN
                 local result stream readcode
                 printf '%q %s\n' "${{PWD}}" "${{*@Q}}" >&${{fds[1]}}
                 while :;
+                do
                     pydrive_read ${{fds[0]}} stream result
                     readcode=$?
                     if ((!readcode))
                     then
                         if ((stream == 1))
                         then
-                            [[ "${{*}}" = exit ]] && wait "${{__PYDRIVE_{COMMANDNAME}___PID}}"
                             result="${{result:-1}}"
                             break
                         else
@@ -191,8 +218,16 @@ class Commands(object):
                         break
                     fi
                 done
-                [[ "${{*}}" = exit ]] && wait "${{__PYDRIVE_{COMMANDNAME}___PID}}"
-                return "${{result}}"
+                if [[ "${{*}}" = exit ]]
+                then
+                    wait "${{!PID}}"
+                    if declare -p "${{FDS}}" &>/dev/null
+                    then
+                        exec {{fds[0]}}<&- {{fds[1]}}<&-
+                        unset "${{FDS}}"
+                    fi
+                fi
+                return "${{result//[[:space:]]}}"
             }}
             __{COMMANDNAME}_completer() {{
                 COMPREPLY=()
@@ -242,18 +277,19 @@ class Commands(object):
             command = sys.stdin.readline()
             while command:
                 try:
-                    result = 0 if self.handle(command) else 1
-                    with multi.stream(1):
-                        print(result)
+                    result = '0' if self.handle(command) else '1'
                 except SystemExit:
-                    with multi.stream(1):
-                        print(0)
+                    result = '0'
                     return
                 except Exception:
                     traceback.print_exc()
+                    result = '1'
+                finally:
                     with multi.stream(1):
-                        print(1)
+                        multi.write(result)
                 command = sys.stdin.readline()
+        except Exception:
+            traceback.print_exc()
         finally:
             sys.stdout = out
 
