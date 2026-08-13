@@ -5,6 +5,8 @@ import sys
 import textwrap
 import traceback
 
+from .multiplex import Multiplexed
+
 class Command(object):
     def get_parser(self):
         p = argparse.ArgumentParser(add_help=False, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -148,6 +150,7 @@ class Commands(object):
         else:
             commandline.extend(flags)
         script = textwrap.dedent(r'''
+            {PYDRIVE_READ}
             {COMMANDNAME}() {{
                 if ! declare -p __PYDRIVE_{COMMANDNAME}__ &>/dev/null
                 then
@@ -159,22 +162,37 @@ class Commands(object):
                     coproc __PYDRIVE_{COMMANDNAME}__ {{ {COMMANDLINE} ;}}
                 fi
                 local fds=("${{__PYDRIVE_{COMMANDNAME}__[@]}}")
-                local result
                 trap 'return' SIGPIPE
                 trap 'trap - RETURN SIGPIPE' RETURN
-                {{
-                    printf '%q %s\n' "${{PWD}}" "${{*@Q}}"
-                    while ! read -r -t 1 -u ${{fds[0]}} result
-                    do
+                local result stream readcode
+                printf '%q %s\n' "${{PWD}}" "${{*@Q}}" >&${{fds[1]}}
+                while :;
+                    pydrive_read ${{fds[0]}} stream result
+                    readcode=$?
+                    if ((!readcode))
+                    then
+                        if ((stream == 1))
+                        then
+                            [[ "${{*}}" = exit ]] && wait "${{__PYDRIVE_{COMMANDNAME}___PID}}"
+                            result="${{result:-1}}"
+                            break
+                        else
+                            printf '%s' "${{result}}"
+                        fi
+                    elif ((readcode > 128))
+                    then
                         if read -t 0
                         then
                             read -r result
-                            printf '%s\n' "${{result}}"
+                            printf '%s\n' "${{result}}" >&${{fds[1]}}
                         fi
-                    done
-                }} >&${{fds[1]}}
+                    else
+                        result=1
+                        break
+                    fi
+                done
                 [[ "${{*}}" = exit ]] && wait "${{__PYDRIVE_{COMMANDNAME}___PID}}"
-                return "${{result:-1}}"
+                return "${{result}}"
             }}
             __{COMMANDNAME}_completer() {{
                 COMPREPLY=()
@@ -196,6 +214,7 @@ class Commands(object):
             CHOICES=shlex.join(self.sub.choices),
             COMMANDLINE=shlex.join(commandline),
             COMMANDNAME=command,
+            PYDRIVE_READ=Multiplexed.SCRIPTS['bash'],
         )
 
     def main(self, package, filename=None):
@@ -219,19 +238,21 @@ class Commands(object):
         """Read commands from stdin and output result to stdout."""
         out = sys.stdout
         try:
-            sys.stdout = sys.stderr
+            multi = sys.stdout = Multiplexed(out)
             command = sys.stdin.readline()
             while command:
                 try:
-                    print(
-                        (0 if self.handle(command) else 1),
-                        file=out, flush=True)
+                    result = 0 if self.handle(command) else 1
+                    with multi.stream(1):
+                        print(result)
                 except SystemExit:
-                    print(0, file=out, flush=True)
+                    with multi.stream(1):
+                        print(0)
                     return
                 except Exception:
                     traceback.print_exc()
-                    print(1, file=out, flush=True)
+                    with multi.stream(1):
+                        print(1)
                 command = sys.stdin.readline()
         finally:
             sys.stdout = out
