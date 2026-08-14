@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import shlex
 import sys
@@ -6,6 +7,20 @@ import textwrap
 import traceback
 
 from .multiplex import Multiplexed
+
+lg = logging.getLogger(__name__)
+
+def loglevel(lvl=None):
+    """Set loglevel"""
+    if lvl is None:
+        lvl = logging.WARNING
+    elif isinstance(lvl, str):
+        if lvl.isdigit():
+            lvl=int(lvl)
+        else:
+            lvl=getattr(logging, lvl.upper())
+    logging.getLogger().setLevel(lvl)
+    return lvl
 
 class Command(object):
     def get_parser(self):
@@ -32,6 +47,7 @@ def py_include_path(package, filename):
     dname = os.path.dirname(filename)
     return os.path.normpath(os.path.join(dname, *(['..'] * reps)))
 
+
 class Commands(object):
     """Manage commands."""
     def __init__(self, *caches, **kwargs):
@@ -44,11 +60,13 @@ class Commands(object):
 
         kwargs: keyword arguments with values for the cache.
         """
-        self.parser = p = argparse.ArgumentParser()
+        self._extraargs = []
+        self._noneinit = {}
+        self.parser = p = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         self.parser.set_defaults(func=self.check)
         self.sub = p.add_subparsers()
         self.cache = {}
-        self._noneinit = {}
         for cache in caches:
             if not cache:
                 continue
@@ -64,7 +82,9 @@ class Commands(object):
                     raise ValueError('Bad cache value {}'.format(cache))
         self.cache.update(kwargs)
         self(Exit)
-        self._extraargs = []
+        p.add_argument(
+            '-l', '--loglevel', type=loglevel, help='loglevel: name or int')
+        self._noneinit['loglevel'] = loglevel
 
     @staticmethod
     def check(args):
@@ -84,6 +104,8 @@ class Commands(object):
         else:
             for args, kwargs, init in self._extraargs:
                 parser.add_argument(*args, **kwargs)
+            parser.add_argument(
+                '-l', '--loglevel', type=loglevel, help='loglevel: name or int')
 
     def add_argument(self, *args, **kwargs):
         """Add generic arguments for the toplevel parser.
@@ -271,6 +293,12 @@ class Commands(object):
 
     def run(self):
         """Read commands from stdin and output result to stdout."""
+        if not logging.getLogger().handlers:
+            logging.basicConfig(
+                stream=sys.stderr,
+                format='%(levelname)s:%(name)s: %(message)s',
+                level=logging.WARNING,
+            )
         out = sys.stdout
         try:
             multi = sys.stdout = Multiplexed(out)
