@@ -139,7 +139,7 @@ class Login(Command):
                 ('client_id', settings['client_id']),
                 ('client_secret', settings['client_secret']),
             ]
-            if args.refresh:
+            if args.refresh or args.auth.get('refresh_token') is not None:
                 req.append(('grant_type', 'refresh_token'))
                 req.append(('refresh_token', args.auth['refresh_token']))
             else:
@@ -204,7 +204,10 @@ class Login(Command):
                         print(response, ':', json.dumps(j, indent=4))
                     except Exception:
                         print(response, 'expected json but got...', response.content)
-                args.auth = Auth(response.json(), dpop)
+                jresponse = response.json()
+                if args.auth.get('refresh_token'):
+                    jresponse.setdefault('refresh_token', args.auth['refresh_token'])
+                args.auth = Auth(jresponse, dpop)
                 args.auth.update(response)
                 return True
             print(Response(response))
