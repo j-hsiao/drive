@@ -13,13 +13,13 @@ import uuid
 import webbrowser
 import tkinter as tk
 
-from pydrive.util.auth import Auth, DPoP
+from pydrive.util.auth import DPoP
 from pydrive.util import command
 from pydrive.util.pkce import PKCE
 from pydrive.util import winsockstdin
 from pydrive.util.response import Response
 from pydrive.util import webbrowserpatch
-from .googledrive import api, Command
+from .googledrive import api, Command, Auth
 
 from .urls import TOKEN_URL, AUTH_URL
 
@@ -64,7 +64,7 @@ class Login(Command):
     def __init__(self):
         self.parser = p = self.get_parser()
         p.add_argument('-o', '--offline', action='store_true')
-        p.add_argument('-r', '--refresh', action='store_true')
+        p.add_argument('-f', '--force', action='store_true', help='force re-login (no refresh).')
         p.add_argument('-v', '--verbose', action='store_true')
         p.add_argument('--no-gui', action='store_false', dest='gui')
         p.add_argument('-d', '--dpop', help='use dpop', nargs='*')
@@ -125,9 +125,15 @@ class Login(Command):
                         return result
 
     def __call__(self, args):
-        if args.auth and not args.refresh:
-            print('Already logged in.')
-            return True
+        if args.auth and not args.force:
+            for item in args.scopes:
+                if item not in args.auth:
+                    print('Need new scope')
+                    break
+            else:
+                print('Already logged in.')
+                return True
+        return True
         if not args.app:
             print('App info missing.')
             return False
@@ -139,7 +145,7 @@ class Login(Command):
                 ('client_id', settings['client_id']),
                 ('client_secret', settings['client_secret']),
             ]
-            if args.refresh or args.auth.get('refresh_token') is not None:
+            if not args.force and args.auth.get('refresh_token') is not None:
                 req.append(('grant_type', 'refresh_token'))
                 req.append(('refresh_token', args.auth['refresh_token']))
             else:

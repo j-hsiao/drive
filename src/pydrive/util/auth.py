@@ -1,12 +1,13 @@
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import subprocess as sp
 import time
 import traceback
-import uuid
 from urllib import parse as urlparse
+import uuid
 
 from .hashing import b64encode, byteslike, strlike, b64sha256, hexdecode
 
@@ -14,39 +15,58 @@ from . import jutil
 from . import listinit
 
 
+lg = logging.getLogger(__name__)
+
 
 class Auth(listinit.ListInit):
     def copy_instance(self, other, dpop=None):
         return self._init(other.data, dpop)
 
     def _init(self, f=None, dpop=None):
-        self.dpop = dpop
+        self.dpop = None
+        self.data = {}
+        try:
+            self.Scope
+        except AttributeError:
+            raise NotImplementedError('Auth is missing Scope subclass.')
         if isinstance(f, str):
             if os.path.exists(f):
                 with open(f, 'r') as f:
-                    self.data = json.load(f)
+                    data = json.load(f)
             else:
                 try:
-                    self.data = json.loads(f)
+                    data = json.loads(f)
                 except ValueError:
                     if f:
-                        self.data = {'access_token': f}
+                        data = {'access_token': f}
                     else:
-                        self.data = {}
+                        data = {}
         elif hasattr(f, 'read'):
-            self.data = json.load(f)
+            data = json.load(f)
         elif isinstance(f, Auth):
-            self.data = f.data.copy()
+            data = f.data.copy()
         elif isinstance(f, dict):
-            self.data = f.copy()
+            data = f.copy()
         elif f is None:
-            self.data = {}
+            data = {}
         else:
             raise ValueError('Bad value for Auth(): {}'.format(f))
+        return self.renew(dpop, **data)
 
-        if self.dpop is None and 'DPoP' in self.data:
-            self.dpop = DPoP(byteslike(self.data['DPoP']))
+    def renew(self, dpop=None, **kwargs):
+        """Renew authorization.
 
+        newinfo: new dict of auth info
+        dpop: the associated dpop if applicable, else keep current.
+        """
+        if dpop is not None:
+            self.dpop = dpop
+            kwargs['DPoP'] = strlike(dpop.private())
+        elif 'DPoP' in kwargs:
+            self.dpop = DPoP(byteslike(kwargs['DPoP']))
+        if kwargs.get('expired') is None and kwargs.get('expires_in') is not None:
+            kwargs['expired'] = time.time() + kwargs['expires_in']
+        self.data.update(kwargs)
         try:
             # https://developers.google.com/identity/protocols/oauth2/web-server#exchange-authorization-code
             # "The type of token returned. This value is always Bearer, even when DPoP is used."
@@ -56,20 +76,25 @@ class Auth(listinit.ListInit):
             ])
             if self.dpop:
                 self.data['DPoP'] = strlike(self.dpop.private())
+            return True
         except Exception:
-            if self.data:
-                traceback.print_exc()
-            self.auth = ''
-            self.dpop = None
-
-        if self.data.get('expired') is None and self.data.get('expires_in', None) is not None:
-            self.data['expired'] = time.time() + self.data.get('expires_in')
-        return True
+            if 'access_token' in self.data:
+                lg.exception('Failed to renew authorization.')
+                return False
+            else:
+                lg.warning('No authorization.')
+                self.auth = ''
+                self.dpop = None
+                return True
 
     def save(self, out):
         jutil.save(self.data, out)
 
     def __contains__(self, scope):
+        if isinstance(scope, str):
+            scope = [scope]
+        current = self.data.get('scope', ())
+
         return str(self.Scope(scope)) in self.data.get('scope', '')
 
     def update(self, info):
@@ -110,44 +135,6 @@ class Auth(listinit.ListInit):
     def __repr__(self):
         return json.dumps(self.data)
 
-    class Scope(object):
-        BASE = 'https://www.googleapis.com/auth/'
-        def __init__(self, scope):
-            self.scope = getattr(scope, 'scope', None)
-            if self.scope is None:
-                if not scope.startswith(self.BASE):
-                    scope = self.BASE + scope
-                self.scope = scope
-
-        def __str__(self):
-            return self.scope
-
-        def __repr__(self):
-            return self.scope[len(self.BASE):]
-
-        def __eq__(self, other):
-            if isinstance(other, Scope):
-                return self.scope == other.scope
-            elif isinstance(other, str):
-                return other == self.scope or other == repr(self)
-            else:
-                return False
-
-        @classmethod
-        def join(cls, scopes):
-            return ' '.join([str(cls(scope)) for scope in scopes])
-    SCOPES = [
-        'drive',
-        'drive.readonly',
-        'drive.metadata',
-        'drive.metadata.readonly',
-        'drive.file',
-        'drive.appdata',
-        'drive.apps.readonly',
-        'drive.meet.readonly',
-        'drive.photos.readonly',
-        'drive.scripts',
-    ]
 
 class DPoP(object):
     __PRIVATE_COMMAND = [

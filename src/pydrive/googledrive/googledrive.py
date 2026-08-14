@@ -40,6 +40,46 @@ class Auth(Auth_):
                 *args, **kwargs)
         return False
 
+    class Scope(object):
+        BASE = 'https://www.googleapis.com/auth/'
+        def __init__(self, scope):
+            self.scope = getattr(scope, 'scope', None)
+            if self.scope is None:
+                if not scope.startswith(self.BASE):
+                    scope = self.BASE + scope
+                self.scope = scope
+
+        def __str__(self):
+            return self.scope
+
+        def __repr__(self):
+            return self.scope[len(self.BASE):]
+
+        def __eq__(self, other):
+            if isinstance(other, Scope):
+                return self.scope == other.scope
+            elif isinstance(other, str):
+                return other == self.scope or other == repr(self)
+            else:
+                return False
+
+        @classmethod
+        def join(cls, scopes):
+            return ' '.join([str(cls(scope)) for scope in scopes])
+    SCOPES = [
+        'drive',
+        'drive.readonly',
+        'drive.metadata',
+        'drive.metadata.readonly',
+        'drive.file',
+        'drive.appdata',
+        'drive.apps.readonly',
+        'drive.meet.readonly',
+        'drive.photos.readonly',
+        'drive.scripts',
+    ]
+
+
 class DTree(DTree_):
     initfuncs = ['_init_None'] + DTree_.initfuncs
     def _init_None(self, initial=None, *args, **kwargs):
