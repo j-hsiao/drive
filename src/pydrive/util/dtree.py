@@ -69,7 +69,7 @@ class DTree(listinit.ListInit):
         """Save to out."""
         jutil.save(self.root, out, **kwargs)
 
-    def __str__(self):
+    def __repr__(self):
         if self.cwd == os.sep:
             parts = ['* ', os.sep]
         else:
