@@ -107,6 +107,8 @@ class Auth(listinit.ListInit):
 
     def __str__(self):
         return self.auth
+    def __repr__(self):
+        return json.dumps(self.data)
 
     class Scope(object):
         BASE = 'https://www.googleapis.com/auth/'

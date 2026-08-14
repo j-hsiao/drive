@@ -1,4 +1,5 @@
 import contextlib
+import functools
 import sys
 import json
 import os
@@ -6,6 +7,21 @@ import uuid
 import traceback
 
 from .listinit import ListInit
+
+@contextlib.contextmanager
+def indent(value):
+    if not value:
+        yield None
+        return
+    original = json.dump, json.dumps
+    try:
+        json.dump, json.dumps = [
+            functools.partial(_, indent=value)
+            for _ in original]
+        yield None
+    finally:
+        json.dump, json.dumps = original
+
 
 def save(info, out, **kwargs):
     with contextlib.ExitStack() as stack:
@@ -40,7 +56,7 @@ class JFile(ListInit, dict):
 
 
     def __repr__(self):
-        return 'JFile({},{})'.format(repr(self.__fname), super(JFile, self).__repr__())
+        return 'JFile({}):{}'.format(repr(self.__fname), json.dumps(self))
 
     def update(self, *args, **kwargs):
         super(JFile, self).update(*args, **kwargs)
