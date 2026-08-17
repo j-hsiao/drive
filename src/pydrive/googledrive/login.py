@@ -4,6 +4,7 @@ import contextlib
 import functools
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import logging
 import os
 import platform
 import selectors
@@ -23,6 +24,7 @@ from .googledrive import api, Command, Auth
 
 from .urls import TOKEN_URL, AUTH_URL
 
+lg = logging.getLogger(__name__)
 
 class LocalAuthServer(HTTPServer):
     class HandlerClass(BaseHTTPRequestHandler):
@@ -65,7 +67,6 @@ class Login(Command):
         self.parser = p = self.get_parser()
         p.add_argument('-o', '--offline', action='store_true')
         p.add_argument('-f', '--force', action='store_true', help='force re-login (no refresh).')
-        p.add_argument('-v', '--verbose', action='store_true')
         p.add_argument('--no-gui', action='store_false', dest='gui')
         p.add_argument('-d', '--dpop', help='use dpop', nargs='*')
         p.add_argument(
@@ -77,7 +78,7 @@ class Login(Command):
             help='Do not include previously granted scopes.')
         api.add_arguments(p)
 
-    def _get_qs(self, appdata, query, verbose, gui):
+    def _get_qs(self, appdata, query, gui):
         with contextlib.ExitStack() as stack:
             server = stack.enter_context(LocalAuthServer())
             query['redirect_uri'] = 'http://localhost:{}'.format(server.port())
@@ -106,22 +107,17 @@ class Login(Command):
                 if gui:
                     r.update()
                 for key, mask in sel.select(.1):
-                    if verbose:
-                        print('selected!:', key, key.fileobj)
+                    lg.info('selected!: %s %s', key, key.fileobj)
                     if key.fileobj is server:
                         server.handle_request()
-                        if verbose:
-                            print('query string from localhost:', server.qs())
+                        lg.info('query string from localhost: %s', server.qs())
                         return server.qs()
                     else:
-                        if verbose:
-                            print('reading a line...')
+                        lg.info('reading a line...')
                         inp = sys.stdin.readline().rstrip()
-                        if verbose:
-                            print('Got stdin response:', inp)
+                        lg.info('Got stdin response: %s', inp)
                         result = urlparse.urlsplit(inp).query
-                        if verbose:
-                            print('result from stdin', result)
+                        lg.info('result from stdin: %s', result)
                         return result
 
     def __call__(self, args):
@@ -133,14 +129,13 @@ class Login(Command):
             else:
                 print('Already logged in.')
                 return True
-        return True
         if not args.app:
             print('App info missing.')
             return False
 
         pkce = PKCE()
         for apptype, settings in args.app.items():
-            print('application type:', apptype)
+            lg.info('application type: %s', apptype)
             req = [
                 ('client_id', settings['client_id']),
                 ('client_secret', settings['client_secret']),
@@ -160,13 +155,13 @@ class Login(Command):
                 pkce.challenge(q)
                 if args.offline:
                     req.append(('access_type', 'offline'))
-                rawqs = self._get_qs(settings, q, args.verbose, args.gui)
+                rawqs = self._get_qs(settings, q, args.gui)
                 req.extend([
                     ('grant_type', 'authorization_code'),
                     ('redirect_uri', q['redirect_uri']),
                 ])
                 if not rawqs:
-                    print('No query string detected.')
+                    lg.error('No query string detected.')
                     return False
                 pkce.verify(req)
                 for name, val in urlparse.parse_qsl(rawqs):
@@ -174,48 +169,41 @@ class Login(Command):
                         req.append((name, val))
                     elif name == 'state':
                         if val != q['state']:
-                            print('State does not match!')
-                            print('  original:', q['state'])
-                            print('  current :', val)
+                            lg.error('State does not match!')
+                            lg.error('  original: %s', q['state'])
+                            lg.error('  current : %s', val)
                             return False
                 if req[-1][0] != 'code':
-                    print('authorization code not found.')
+                    lg.error('authorization code not found.')
                     return False
             headers = {}
-            # TODO: I still can't seem to get this dpop thing to work.
-            # Even if I use a library to create the dpop jwt, it still fails.
             dpop = None
             token_url = settings.get('token_uri', TOKEN_URL)
             if args.dpop is not None:
                 dpop = DPoP(private=(args.dpop[0] if args.dpop else None))
                 dpop(headers, token_url, auth=req[-1][1])
-                if args.verbose:
-                    print('dpop public key:', dpop.public())
-            if args.verbose:
-                print('target url:', token_url)
-                print('body', req)
-                print('headers', headers)
+                lg.info('dpop public key: %s', dpop.public())
+            lg.info('target url: %s', token_url)
+            lg.info('body %s', req)
+            lg.info('headers %s', headers)
             response = self.session(args).post(
                 token_url, data=req, headers=headers)
             if 200 <= response.status_code < 300:
-                if args.verbose:
-                    print(Response(response))
-                else:
-                    try:
-                        j = response.json()
-                        if 'access_token' in j:
-                            j['access_token'] = '***'
-                        if 'refresh_token' in j:
-                            j['refresh_token'] = '***'
-                        print(response, ':', json.dumps(j, indent=4))
-                    except Exception:
-                        print(response, 'expected json but got...', response.content)
+                try:
+                    j = response.json()
+                    if 'access_token' in j:
+                        j['access_token'] = '***'
+                    if 'refresh_token' in j:
+                        j['refresh_token'] = '***'
+                    lg.info('%s: %s', response, json.dumps(j, indent=4))
+                except Exception:
+                    lg.exception('error parsing response: %s', Response(response))
                 jresponse = response.json()
                 if args.auth.get('refresh_token'):
                     jresponse.setdefault('refresh_token', args.auth['refresh_token'])
-                args.auth = Auth(jresponse, dpop)
+                args.auth.renew(dpop, **jresponse)
                 args.auth.update(response)
                 return True
-            print(Response(response))
-            print(response.headers)
+            lg.error('%s', Response(response))
+            lg.error('%s', (response.headers)
             return False
