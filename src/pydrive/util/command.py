@@ -168,7 +168,7 @@ class Commands(object):
             else:
                 pypath = drivepath
             commandline.append('PYTHONPATH=' + pypath)
-        commandline.extend([sys.executable, '-m', package])
+        commandline.extend(['exec', sys.executable, '-m', package])
         if isinstance(flags, str):
             commandline.append(flags)
         else:
@@ -200,6 +200,7 @@ class Commands(object):
                     # so using drive in a pipe leads to "invalid file descriptor"
                     fds=()
                     exec {{fds[0]}}<&${{pfd[0]}} {{fds[1]}}>&${{pfd[1]}}
+
                 fi
                 trap '
                     if declare -p "${{BASE}}" &>/dev/null
