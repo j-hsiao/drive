@@ -214,6 +214,7 @@ class Commands(object):
                     fi
                     return
                     ' SIGPIPE
+                trap 'echo forwarding sigint...; kill -s SIGINT "${{!PID}}"' SIGINT
                 trap 'trap - RETURN SIGPIPE' RETURN
                 local result stream readcode
                 printf '%q %s\n' "${{PWD}}" "${{*@Q}}" >&${{fds[1]}}
