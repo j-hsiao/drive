@@ -78,12 +78,15 @@ class GetCommand(Command):
         return []
 
     def getquery(self, args):
-        return [
+        ret = [
             ('corpora', args.corpora),
             ('fields', 'files({}),nextPageToken,kind,incompleteSearch'.format(','.join(args.fields))),
             ('orderBy', parse_order(args.order)),
-            ('q', ' and '.join(self.qstr(args))),
         ]
+        qfilter = self.qstr(args)
+        if qfilter:
+            ret.append(('q', ' and '.join(self.qstr(args))))
+        return ret
 
     def update_dtree(self, args, filemetas):
         # TODO
