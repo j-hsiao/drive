@@ -205,5 +205,5 @@ class Login(Command):
                 args.auth.update(response)
                 return True
             lg.error('%s', Response(response))
-            lg.error('%s', (response.headers)
+            lg.error('%s', (response.headers))
             return False
