@@ -109,16 +109,18 @@ class GetCommand(Command):
                 response = self.session(args).get(
                     url, headers=args.auth({}, url, htm='get'))
                 args.auth(response)
-                lg.info('%s', Response(response))
+                lg.debug('%s', Response(response))
                 if 200 <= response.status_code < 300:
                     result = response.json()
-                    lg.info('incompleteSearch in result: %s', incompleteSearch in result)
+                    lg.info('incompleteSearch: %s explicit: %s', result.get('incompleteSearch'), ('incompleteSearch' in result))
                     files.extend(result['files'])
+                    lg.info('net length: %s', len(files))
                     if result.get('kind', 'drive#fileList') != 'drive#fileList':
                         print(
                             'WARNING, response "kind" is unexpected. Got',
                             result['kind'], 'expected drive#fileList')
                     nextpage = result.get('nextPageToken', None)
+                    lg.debug('next page token: %s', nextpage)
                     if nextpage:
                         if query and query[-1][0] == 'nextPageToken':
                             query[-1] = ('nextPageToken', nextpage)
@@ -129,6 +131,9 @@ class GetCommand(Command):
                     lg.error('%s', Response(response))
                     lg.error('%s', response.headers)
                     return files
+            return files
+        except KeyboardInterrupt:
+            lg.warning('Interrupted, returning current results.')
             return files
         finally:
             self.update_dtree(args, files)
