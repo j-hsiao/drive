@@ -7,12 +7,16 @@ Files(fields):
 """
 import os
 import json
+import logging
 from urllib import parse as urlparse
 from pydrive.util.response import Response
 
 from .googledrive import api, Command
 
 from .urls import FILE_URL
+
+lg = logging.getLogger(__name__)
+
 
 def parse_order(order):
     items = []
@@ -67,7 +71,6 @@ class GetCommand(Command):
             nargs='*', default=self.DEFAULT_FIELDS,
             help='desired file metadata.',
         )
-        p.add_argument('-v', '--verbose', action='store_true')
 
     def qstr(self, args):
         if not args.trash:
@@ -102,15 +105,14 @@ class GetCommand(Command):
         try:
             while result.get('incompleteSearch'):
                 url = '?'.join([FILE_URL, urlparse.urlencode(query)])
-                if args.verbose:
-                    print('GET', url)
+                lg.info('GET %s', url)
                 response = self.session(args).get(
                     url, headers=args.auth({}, url, htm='get'))
                 args.auth(response)
-                if args.verbose:
-                    print(Response(response))
+                lg.info('%s', Response(response))
                 if 200 <= response.status_code < 300:
                     result = response.json()
+                    lg.info('incompleteSearch in result: %s', incompleteSearch in result)
                     files.extend(result['files'])
                     if result.get('kind', 'drive#fileList') != 'drive#fileList':
                         print(
@@ -123,9 +125,9 @@ class GetCommand(Command):
                         else:
                             query.append(('nextPageToken', nextpage))
                 else:
-                    if not args.verbose:
-                        print(Response(response))
-                    print(response.headers)
+                    lg.error('Error')
+                    lg.error('%s', Response(response))
+                    lg.error('%s', response.headers)
                     return files
             return files
         finally:
@@ -157,7 +159,6 @@ class LS(Command):
         p.add_argument('--all', action='store_true', help='include items from all drives')
         p.add_argument('-t', '--trash', action='store_true', help='include trashed items')
         p.add_argument('--fields', default='id,name,mimeType')
-        p.add_argument('-v', '--verbose', action='store_true')
         p.add_argument('-l', '--longform', action='store_true', help='prints extra fields for the file.')
         p.add_argument('-f', '--force', action='store_true', help='force an api call instead of using cached data.')
         p.add_argument(
@@ -174,12 +175,10 @@ class LS(Command):
     def _get(self, args, query, pageToken=None):
         if pageToken:
             query = query + [('nextPageToken', pageToken)]
-        if args.verbose:
-            for k,v in query:
-                print(k, v)
+        for k,v in query:
+            lg.info('%s: %s', k, v)
         url = '?'.join([FILE_URL, urlparse.urlencode(query)])
-        if args.verbose:
-            print('GET', url)
+        lg.info('GET %s', url)
         response = self.session(args).get(
             url, headers=args.auth({}, url, htm='get')
         )
@@ -208,8 +207,7 @@ class LS(Command):
         files = []
         while 1:
             response = self._get(args, query, nextpage)
-            if args.verbose:
-                print(Response(response))
+            lg.info('%s', Response(response))
             if 200 <= response.status_code < 300:
                 result = response.json()
                 files.extend(result['files'])
@@ -229,9 +227,8 @@ class LS(Command):
                                     print(fmt.format(k, v))
                     return True
             else:
-                if not args.verbose:
-                    print(Response(response))
-                print(response.headers)
+                lg.error('%s', Response(response))
+                lg.error('%s', response.headers)
                 return False
 
     def display_node(self, node):
