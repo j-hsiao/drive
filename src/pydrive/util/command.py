@@ -138,6 +138,8 @@ class Commands(object):
         else:
             ret = type(self)(self.cache, *args, **kwargs)
             for name, p in self.sub.choices.items():
+                if name.lower() == 'exit':
+                    continue
                 ret.sub.add_parser(
                     name,
                     parents=[p],
@@ -217,7 +219,7 @@ class Commands(object):
                 printf '%q %s\n' "${{PWD}}" "${{*@Q}}" >&${{fds[1]}}
                 while :;
                 do
-                    pydrive_read ${{fds[0]}} stream result
+                    pydrive_read ${{fds[0]}} stream result 1
                     readcode=$?
                     if ((!readcode))
                     then
