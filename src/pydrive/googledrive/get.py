@@ -28,7 +28,7 @@ def parse_order(order):
     return ','.join(items)
 
 class GetCommand(Command):
-    DEFAULT_FIELDS = ['id', 'name', 'mimeType', 'parents']
+    DEFAULT_FIELDS = ['id', 'name', 'mimeType', 'parents', 'shortcutDetails']
     def __init__(self):
         self.parser = p = self.get_parser()
         api.add_arguments(p)

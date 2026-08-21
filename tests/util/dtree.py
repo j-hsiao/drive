@@ -1,5 +1,8 @@
 import json
 import os
+import logging
+import sys
+import pprint
 
 from pydrive.util import dtree
 
@@ -9,26 +12,44 @@ dummyflat = [
 
     dict(name='hello', parents=['2'], id='4'),
     dict(name='goodbye', parents=['2'], id='5'),
+
+    dict(name='shortcut', id='6', mimeType='shortcut'),
+    dict(name='standalone', id='6'),
+    dict(name='notclobbered', id='6', extra='whatever'),
+
+    dict(name='shortcut', id='7', mimeType='shortcut', parents=['5']),
+    dict(name='standalone', id='7'),
+    dict(name='notclobbered', id='7', extra='whatever'),
 ]
-roots = dtree.parse_flat(dummyflat)
-assert roots == [
-    dict(name='', id='1', children={
-        'hello': dict(
-            name='hello',
-            parents=['1'],
-            id='2',
-            children={
-                'hello': dict(name='hello', parents=['2'], id='4'),
-                'goodbye': dict(name='goodbye', parents=['2'], id='5'),
+roots, dangle = dtree.DTree().parse_parents(dummyflat)
+expect = [{
+    'id': '1', 'name': '',
+    'children': {
+        'goodbye': {'id': '3', 'name': 'goodbye', 'parents': ['1']},
+        'hello': {
+            'id': '2', 'name': 'hello', 'parents': ['1'],
+            'children': {
+                'goodbye': {
+                    'id': '5', 'name': 'goodbye', 'parents': ['2'],
+                    'children': {
+                        'shortcut': {
+                            '_id': '7', 'id': '7', 'mimeType': 'shortcut',
+                            'name': 'shortcut', 'parents': ['5'],
+                            '': {
+                                'extra': 'whatever',
+                                'id': '7',
+                                'name': 'standalone'
+                            },
+                        },
+                    },
+                },
+                'hello': {'id': '4', 'name': 'hello', 'parents': ['2']},
             },
-        ),
-        'goodbye': dict(
-            name='goodbye',
-            parents=['1'],
-            id='3'
-        )
-    })
-]
+        },
+    },
+}]
+assert roots == expect
+assert dangle == {'6': dict(name='standalone', id='6', extra='whatever')}
 
 def normed(l):
     if isinstance(l, str):
@@ -40,38 +61,44 @@ assert list(name for name, info in tree.walk('/')) == []
 assert list(name for name, info in tree.walk()) == []
 
 assert tree.get('/a/b') is None
-assert isinstance(tree.get('/a/b', make=True), dict)
+assert tree.makedirs('/a/b') == (tree.dirnode('b'), normed(['/a', '/a/b']))
 # /
 #   a/
-#     b
+#     b/
 
-assert not tree.isdir('/a/b')
+assert tree.isdir('/a/b')
 assert tree.isdir('/a')
 assert tree.isdir('/a/')
 assert tree.isdir('/')
 
 assert tree.isdir('a')
-assert not tree.isdir('a/b')
+assert tree.isdir('a/b')
 
-tree.update([dict(name=name) for name in 'abc'], '/a')
+assert tree.makedirs('/a/b/c') == (tree.dirnode('c'), normed(['/a/b/c/']))
+tree.cd('a/b/')
+assert tree.makedirs('/a/b/d') == (tree.dirnode('d'), normed(['/a/b/d/']))
+
 # /
 #   a/
-#     a/
-#     b/
-#     c/
+#*    b/
+#       c/
+#       d/
 
-assert normed(list(name for name, info in tree.walk())) == normed(['/a/', '/a/a', '/a/b', '/a/c'])
+assert not tree.isdir(tree.touch('x'))
+assert not tree.isdir(tree.touch('../y'))
+assert not tree.isdir(tree.touch('z'))
 
-tree.cd('a')
-assert tree.cwd == normed('/a')
+# /
+#   a/
+#*    b/
+#       c/
+#       d/
+#       x
+#       z
+#     y
 
-assert normed(list(name for name, info in tree.walk())) == normed(['/a/a', '/a/b', '/a/c'])
+assert tree.cwd == normed('/a/b')
+assert tree.normpath('../y') == '/a/y'
 
-assert str(tree) == '''  /
-*   a/
-      a
-      b
-      c'''
-
-
-
+assert set([_['name'] for _ in tree.ls()]) == set('cdxz')
+assert set([_['name'] for _ in tree.ls('..')]) == set('by')
