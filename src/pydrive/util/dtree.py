@@ -281,6 +281,6 @@ class DTree(listinit.ListInit):
         return kwargs
     def dirnode(self, name, **kwargs):
         kwargs['name'] = name
-        kwargs.setdefault('chidlren', {})
+        kwargs.setdefault('children', {})
         return kwargs
 
