@@ -26,6 +26,10 @@ class DTree(listinit.ListInit):
             self.root = initial
         else:
             self.root = {'children': {}, 'id': rootid}
+        self.root.setdefault('children', {})[''] = {
+            'name': 'shared',
+            'children': {},
+        }
         self.cwd = os.sep
         return True
 
@@ -156,14 +160,13 @@ class DTree(listinit.ListInit):
         except KeyError:
             return node
 
-
     def get_(self, path, default=None):
         """Return an item from normalized path.
 
         path: a normalized path via self.normpath.
         """
         node = self.root
-        for item in filter(None, path.split(os.sep)):
+        for item in path.split(os.sep)[1:]:
             try:
                 node = node['children'][item]
             except KeyError:
@@ -178,11 +181,10 @@ class DTree(listinit.ListInit):
             raise KeyError(path)
         return ret
 
-
     def makedirs_(self, path):
         node = self.root
         made = []
-        parts = list(filter(None, path.split(os.sep)))
+        parts = path.split(os.sep)[1:]
         for depth, item in enumerate(parts):
             try:
                 children = node['children']
@@ -213,15 +215,24 @@ class DTree(listinit.ListInit):
         orig = self.get_(path)
         if orig is None:
             dname, bname = os.path.split(path)
-            node, made = self.makedirs_(dname)
-            for k, v in self.node(bname).items():
-                node.setdefault(k, v)
-            node['children'] = node
-            return node
-        else:
-            raise NotImplementedError
-            # walk and update...
-            # todo
+            dnode, made = self.makedirs_(dname)
+            dnode['children'][node['name']] = node
+            return
+        q = [(orig, node)]
+        while q:
+            old, new = q.pop()
+            # TODO merge new info into old.
+            if 'children' not in new:
+                continue
+            children = old['children']
+            for name, child in new.get('children', {}).items():
+                try:
+                    ochild = children[name]
+                except KeyError:
+                    children[name] = child
+                else:
+                    q.append((ochild, child))
+
 
     def update(self, path, node):
         return self.update_(self.normpath(path), node)
