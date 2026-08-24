@@ -89,23 +89,24 @@ class DTree(DTree_):
                 *args, **kwargs)
         return False
 
-
-        folder_mimes=[],
-
     def isdir_(self, node):
         """Check if node (dict) is a dir."""
         return node.get['mimeType'] == 'application/vnd.google-apps.folder'
     def islink_(self, node):
         return node.get('mimeType') == 'application/vnd.google-apps.shortcut'
-    def link_target_(self, node):
+    def link_target_(self, node, lut, full=True):
         try:
-            return node['shortcutDetails']['targetId']
+            tgt = node['shortcutDetails']['targetId']
         except KeyError:
-            return None
+            return node['id']
+        if full:
+            return self.link_target(lut[tgt], lut, full)
+        else:
+            return tgt
 
-    def dirnode(self, name, id=None, **kwargs):
-        kwargs['mimeType'] = 'application/vnd.google-apps.folder'
-        return super(DTree, self).dirnode(name, id, **kwargs)
+    def dirnode(self, name, **kwargs):
+        kwargs.setdefault('mimeType', 'application/vnd.google-apps.folder')
+        return super(DTree, self).dirnode(name, **kwargs)
 
 
 api = Commands(['auth', 'app', 'dtree'])

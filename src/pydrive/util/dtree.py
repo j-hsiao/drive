@@ -10,118 +10,102 @@ lg = logging.getLogger(__name__)
 
 class DTree(listinit.ListInit):
     """Maintain a local structure of dirs/items."""
-    def _init(self, initial=None, rootid='root', **kwargs):
+    def _init(self, initial=None, **kwargs):
         """Initialize DTree.
 
-        initial: Dtree initializer.  Another Dtree to copy or a filepath."""
+        initial: Dtree initializer.  Another Dtree to copy or a filepath.
+        kwargs: *key
+            * can be id, name, children, parents to customize the
+            underlying datastructure.
+        """
+        for key in ['id', 'name', 'children', 'parents']:
+            setattr(self, key+'key', kwargs.get(key+'key', key))
+        self.lut = {'': {self.childrenkey: {}}}
         if isinstance(initial, str):
-            try:
-                with open(initial, 'r') as f:
-                    self.root = json.load(f)
-            except Exception:
-                pass
+            with open(initial, 'r') as f:
+                self.lut = json.load(f)
         elif hasattr(initial, 'read'):
-            self.root = json.load(f)
+            self.lut = json.load(f)
         elif initial:
-            self.root = initial
-        else:
-            self.root = {'children': {}, 'id': rootid}
-        self.root.setdefault('children', {})[''] = {
-            'name': 'shared',
-            'children': {},
-        }
+            self.lut[''].update(initial)
+        self.root = self.lut['']
+        shares = self.root.setdefault(self.childrenkey, {}).setdefault('', {})
+        shares.setdefault(self.idkey, '')
+        shares.setdefault(self.namekey, 'share')
+        shares.setdefault(self.childrenkey, {})
         self.cwd = os.sep
         return True
 
-    def parse_parents(self, files, idkey='id', namekey='name', parkey='parents', truid=None):
+    def parse_parents(self, files):
         """Parse files into a tree structure.
 
         files: list of file info (dict).  Each itme should have keys:
-            idkey: required, Key to identifying info in parents key.
-            namekey: required, key for name of the the file.
-            parkey: optional, key into each file for list of parent(s)
-            truid: truid key for shortcuts
+            self.idkey and self.namekey are required.
+            self.parentskey is optional.
+
+        Return roots, dangle, lut
+        lut: dict of id: node.
+        roots: list of root nodes.  These are nodes that were referred
+               to as parents but not in `files`.
+        dangle: list of nodes in `files` without any parents.
         """
         q = []
         lut = {}
-        dangle = {}
-        links = []
-        if not truid:
-            truid = '_' + idkey
+        dangle = set()
         for item in files:
             item = item.copy()
-            itemid = item[idkey]
+            itemid = item[self.idkey]
             q.append(item)
             if self.isdir_(item):
-                item.setdefault('children', {})
-            if self.islink_(item):
-                links.append(item)
-            else:
-                prev = lut.setdefault(itemid, item)
-                if prev is not item:
-                    lg.warning('Item already exists: %s vs %s', prev, item)
-                    for k, v in item.items():
-                        prev.setdefault(k, v)
-                if parkey not in prev:
-                    dangle[itemid] = prev
-        for link in links:
-            targetid = self.link_target_(link)
-            try:
-                link[''] = lut[targetid]
-            except KeyError:
-                lg.error('Link %s has no target.', link[idkey])
-            else:
-                link[truid] = link[idkey]
-                link[idkey] = targetid
+                item.setdefault(self.childrenkey, {})
+            prev = lut.setdefault(itemid, item)
+            if prev is not item:
+                lg.warning('Item already exists: %s vs %s', prev, item)
+                for k, v in item.items():
+                    prev.setdefault(k, v)
+            if self.parentskey not in item:
+                dangle.add(itemid)
         roots = []
         for item in q:
             try:
-                parents = item[parkey]
+                parents = item[self.parentskey]
             except KeyError:
-                parents = []
-            if isinstance(parents, str):
-                parents = [parents]
-            name = item[namekey]
+                continue
+            name = item[self.namekey]
             for parent in parents:
                 try:
                     pnode = lut[parent]
                 except KeyError:
-                    pnode = lut[parent] = {
-                        'children': {}, idkey: parent, namekey: ''
-                    }
-                    roots.append(pnode)
+                    pnode = lut[parent] = {self.childrenkey: {}, self.idkey: parent}
+                    roots.append(parent)
                 if self.islink_(pnode):
                     lg.warning('parent is a link')
                 try:
-                    children = pnode['children']
+                    children = pnode[self.childrenkey]
                 except KeyError:
-                    children = pnode['children'] = {}
-                children[name] = item
-                dangle.pop(item[idkey], None)
-        for link in links:
-            try:
-                children = link['']['children']
-            except KeyError:
-                continue
-            link['children'] = children
-        return roots, dangle
+                    children = pnode[self.childrenkey] = {}
+                if children.setdefault(name, item) is not item:
+                    lg.warning(
+                        'Multiple children with the same name: %s vs %s',
+                        children[name], item)
+        return lut, roots, dangle
 
     def copy_instance(self, initial, *args, **kwargs):
-        # should this be deep copy?
-        for attr in ('root', 'items', 'cwd'):
+        """Shallow copy values from another dtree."""
+        for attr in ('lut', 'root', 'cwd', 'idkey', 'namekey', 'childrenkey', 'parentskey'):
             setattr(self, kwargs.get(attr, getattr(initial, attr)))
 
     def save(self, out, **kwargs):
         """Save to out."""
-        jutil.save(self.root, out, **kwargs)
+        jutil.save(self.lut, out, **kwargs)
 
     def __repr__(self):
         if self.cwd == os.sep:
             parts = ['* ', os.sep]
         else:
             parts = ['  ', os.sep]
-        if self.root.get('name'):
-            parts.extend([' (', self.root['name'], ')'])
+        if self.root.get(self.namekey):
+            parts.extend([' (', self.root[self.namekey], ')'])
         for name, node in self.walk('/'):
             parts.append('\n')
             if name.rstrip(os.sep) == self.cwd:
@@ -134,10 +118,10 @@ class DTree(listinit.ListInit):
             parts.append(split[-1])
             if name.endswith(os.sep):
                 parts.append(os.sep)
-            # parts.append([' (', node['id'], ')'])
         return ''.join(parts)
 
     def getcwd(self):
+        """Return the cwd of this DTree."""
         return self.cwd
 
     def normpath(self, path):
@@ -148,17 +132,36 @@ class DTree(listinit.ListInit):
 
     def cd(self, path):
         """Change cwd."""
-        path = self.normpath(path)
-        if self.isdir(path):
-            self.cwd = path
+        normed = self.normpath(path)
+        nd = self.get_(normed)
+        if nd is None:
+            raise ValueError('{} does not exist or was not loaded.'.format(repr(path)))
+        if self.isdir_(nd):
+            self.cwd = normed
             return
-        raise ValueError('path is not a dir or is not loaded.')
+        raise ValueError('{} not a directory'.format(repr(path)))
     def ls(self, path='.'):
+        """Get a list of children or the node."""
         node = self.get(path)
         try:
-            return list(node['children'].values())
+            return list(node[self.childrenkey].values())
         except KeyError:
             return node
+
+    def path(self, node):
+        """Calculate the path of this node."""
+        parts = []
+        namekey = self.namekey
+        name = node.get(namekey)
+        while name is not None:
+            parts.append(name)
+            try:
+                node = self.lut[node[self.parentskey][0]]
+            except KeyError:
+                break
+            name = node.get(self.namekey)
+        parts.append('')
+        return os.sep.join(reversed(parts))
 
     def get_(self, path, default=None):
         """Return an item from normalized path.
@@ -166,15 +169,18 @@ class DTree(listinit.ListInit):
         path: a normalized path via self.normpath.
         """
         node = self.root
-        for item in path.split(os.sep)[1:]:
+        for item in path.split(os.sep)[1+path.endswith(os.sep):]:
             try:
-                node = node['children'][item]
+                node = node[self.childrenkey][item]
             except KeyError:
                 return default
         return node
     def get(self, path, default=None):
-        """Same as get_ but normalize path first."""
+        """Same as get_ but path can be unnormalized."""
         return self.get_(self.normpath(path), default)
+    def __call__(self, nodeid):
+        """Get node via id."""
+        return self.lut[nodeid]
     def __getitem__(self, path):
         ret = self.get(path)
         if ret is None:
@@ -182,12 +188,16 @@ class DTree(listinit.ListInit):
         return ret
 
     def makedirs_(self, path):
+        """Create directory + intermediates to normalized path.
+
+        Return (target, created)
+        """
         node = self.root
         made = []
         parts = path.split(os.sep)[1:]
         for depth, item in enumerate(parts):
             try:
-                children = node['children']
+                children = node[self.childrenkey]
             except KeyError:
                 raise ValueError('Not a directory.')
             try:
@@ -197,45 +207,36 @@ class DTree(listinit.ListInit):
                 made.append(os.path.join(os.sep, *parts[:depth+1]))
         return node, made
     def makedirs(self, path):
+        """Make dirs from non-normalized path."""
         return self.makedirs_(self.normpath(path))
     def touch_(self, path):
+        """Touch a file specified by normalized path."""
         dname, bname = os.path.split(path)
-        node, made = self.makedirs_(dname)
-        ret = node['children'][bname] = self.node(bname)
-        return ret
+        dnode = self.get_(dname)
+        return dnode[self.childrenkey].setdefault(bname, self.node(bname))
     def touch(self, path):
+        """Touch a file by non-normalized path."""
         return self.touch_(self.normpath(path))
 
-    def update_(self, path, node):
+    def update_(self, node, path=None, id=None):
         """Update an entry.
 
         path: the path to the entry
         node: the info to update
         """
-        orig = self.get_(path)
-        if orig is None:
-            dname, bname = os.path.split(path)
-            dnode, made = self.makedirs_(dname)
-            dnode['children'][node['name']] = node
-            return
-        q = [(orig, node)]
-        while q:
-            old, new = q.pop()
-            # TODO merge new info into old.
-            if 'children' not in new:
-                continue
-            children = old['children']
-            for name, child in new.get('children', {}).items():
-                try:
-                    ochild = children[name]
-                except KeyError:
-                    children[name] = child
-                else:
-                    q.append((ochild, child))
-
-
-    def update(self, path, node):
-        return self.update_(self.normpath(path), node)
+        if id is None:
+            orig = self.get_(path)
+            if orig is None:
+                dname, bname = os.path.split(path)
+                dnode, made = self.makedirs_(dname)
+                orig = dnode[self.childrenkey].setdefault(node[self.namekey], {})
+                if self.childrenkey in node:
+                    orit.setdefault(self.childrenkey, {})
+        else:
+            orig = self.lut[id]
+        self.merge(orig, node)
+    def update(self, node, path=None, id=None):
+        return self.update_(node, self.normpath(path), id)
 
     def walk(self, path='.', sort=True, _node=None):
         """Walk through all descendents of the given path."""
@@ -244,14 +245,23 @@ class DTree(listinit.ListInit):
             _node = self.get_(path)
         else:
             if self.isdir_(_node):
-                yield path + os.sep, _node
+                if path.endswith(os.sep):
+                    if not _node[self.childrenkey]:
+                        return
+                else:
+                    yield path + os.sep, _node
             else:
                 yield path, _node
-        items = _node.get('children', {}).items()
+                return
+        items = _node.get(self.childrenkey, {}).items()
         if sort:
             items = sorted(items)
         for cname, cnode in items:
-            for res in self.walk(os.path.join(path, cname), sort=sort, _node=cnode):
+            if cname:
+                cpath = os.path.join(path, cname)
+            else:
+                cpath = path + os.sep
+            for res in self.walk(cpath, sort=sort, _node=cnode):
                 yield res
 
     def isdir(self, nodeOrPath):
@@ -264,10 +274,11 @@ class DTree(listinit.ListInit):
         if isinstance(nodeOrPath, str):
             nodeOrPath = self[nodeOrPath]
         return self.islink_(nodeOrPath)
-    def link_target(self, nodeOrPath):
+    def link_target(self, nodeOrPath, full=True):
+        """Return target id."""
         if isinstance(nodeOrPath, str):
             nodeOrPath = self[nodeOrPath]
-        return self.link_target_(nodeOrPath)
+        return self.link_target_(nodeOrPath, self.lut, full)
 
     # ========================
     # implementation specific:
@@ -275,23 +286,47 @@ class DTree(listinit.ListInit):
     def isdir_(self, node):
         """Check if node (dict) is a dir."""
         return (
-            'children' in node
+            self.childrenkey in node
             or (self.islink_(node) and self.isdir_(node.get('', {})))
         )
     def islink_(self, node):
         return (
             '' in node
-            or ('_id' in node and node.get('id') != node['_id'])
+            or 'target' in node
             or 'shortcut' in node.get('mimeType', '').lower()
         )
-    def link_target_(self, node):
-        return node.get('id')
+    def link_target_(self, node, lut, full=True):
+        """Calculate the link target"""
+        try:
+            tgt = node['target']
+        except KeyError:
+            return node[self.idkey]
+        if full:
+            return self.link_target_(lut[tgt], lut, full)
+        else:
+            return tgt
 
     def node(self, name, **kwargs):
-        kwargs['name'] = name
+        kwargs[self.namekey] = name
         return kwargs
     def dirnode(self, name, **kwargs):
-        kwargs['name'] = name
-        kwargs.setdefault('children', {})
-        return kwargs
+        kwargs.setdefault(self.childrenkey , {})
+        return self.node(name, **kwargs)
 
+    def merge(self, old, new):
+        """Merge file info dict new into old."""
+        for k, v in new.items():
+            if k == self.childrenkey:
+                try:
+                    children = old[self.childrenkey]
+                except KeyError:
+                    raise ValueError('Merging dir node into a non-dir node.')
+                for cname, cnode in new[self.childrenkey].items():
+                    if cname in children:
+                        merge(children[cname], cnode)
+                    else:
+                        children[cname] = cnode
+            else:
+                if k in old and v != old[k]:
+                    lg.warning('Changing file value %s: %s -> %s', k, old[k], v)
+                    old[k] = v

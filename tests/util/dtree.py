@@ -13,43 +13,35 @@ dummyflat = [
     dict(name='hello', parents=['2'], id='4'),
     dict(name='goodbye', parents=['2'], id='5'),
 
-    dict(name='shortcut', id='6', mimeType='shortcut'),
     dict(name='standalone', id='6'),
     dict(name='notclobbered', id='6', extra='whatever'),
+    dict(name='shortcut', id='7', mimeType='shortcut', target='6'),
 
-    dict(name='shortcut', id='7', mimeType='shortcut', parents=['5']),
-    dict(name='standalone', id='7'),
-    dict(name='notclobbered', id='7', extra='whatever'),
+    dict(name='shortcut', id='9', mimeType='shortcut', parents=['5'], target='8'),
+    dict(name='standalone', id='8'),
+    dict(name='notclobbered', id='8', extra='whatever'),
 ]
-roots, dangle = dtree.DTree().parse_parents(dummyflat)
-expect = [{
-    'id': '1', 'name': '',
-    'children': {
-        'goodbye': {'id': '3', 'name': 'goodbye', 'parents': ['1']},
-        'hello': {
-            'id': '2', 'name': 'hello', 'parents': ['1'],
-            'children': {
-                'goodbye': {
-                    'id': '5', 'name': 'goodbye', 'parents': ['2'],
-                    'children': {
-                        'shortcut': {
-                            '_id': '7', 'id': '7', 'mimeType': 'shortcut',
-                            'name': 'shortcut', 'parents': ['5'],
-                            '': {
-                                'extra': 'whatever',
-                                'id': '7',
-                                'name': 'standalone'
-                            },
-                        },
-                    },
-                },
-                'hello': {'id': '4', 'name': 'hello', 'parents': ['2']},
-            },
-        },
-    },
-}]
-assert roots == expect
-assert dangle == {'6': dict(name='standalone', id='6', extra='whatever')}
+lut, roots, dangle = dtree.DTree().parse_parents(dummyflat)
+assert roots == ['1']
+assert dangle == set('678')
+
+n1 = lut['1']
+n2 = n1['children']['hello']
+n3 = n1['children']['goodbye']
+n4 = n2['children']['hello']
+n5 = n2['children']['goodbye']
+n9 = n5['children']['shortcut']
+
+assert set('123456789').issubset(lut)
+assert n1 is lut['1']
+assert n2 is lut['2']
+assert n3 is lut['3']
+assert n1['children'] == dict(hello=n2, goodbye=n3)
+assert n4 is lut['4']
+assert n5 is lut['5']
+assert n2['children'] == dict(hello=n4, goodbye=n5)
+assert n9 is lut['9']
+assert n5['children'] == dict(shortcut=n9)
 
 def normed(l):
     if isinstance(l, str):
@@ -57,6 +49,8 @@ def normed(l):
     return [os.path.normpath(_) for _ in l]
 
 tree = dtree.DTree()
+assert tree['/'] is tree.root
+assert tree['//'] is tree.root['children']['']
 assert list(name for name, info in tree.walk('/')) == []
 assert list(name for name, info in tree.walk()) == []
 
@@ -102,3 +96,61 @@ assert tree.normpath('../y') == '/a/y'
 
 assert set([_['name'] for _ in tree.ls()]) == set('cdxz')
 assert set([_['name'] for _ in tree.ls('..')]) == set('by')
+
+tree.update(dict(children={k:dict(name=k) for k in 'efg'}), '.')
+# /
+#   a/
+#*    b/
+#       c/
+#       d/
+#       x
+#       z
+#       e
+#       f
+#       g
+#     y
+assert set(tree['.']['children']) == set('cdxzefg')
+assert not tree.isdir('e')
+assert not tree.isdir('f')
+assert not tree.isdir('g')
+
+assert [name for name, node in tree.walk('/')] == [
+    '/a/',
+    '/a/b/',
+    '/a/b/c/',
+    '/a/b/d/',
+    '/a/b/e',
+    '/a/b/f',
+    '/a/b/g',
+    '/a/b/x',
+    '/a/b/z',
+    '/a/y',
+]
+
+assert [name for name, node in tree.walk()] == [
+    '/a/b/c/',
+    '/a/b/d/',
+    '/a/b/e',
+    '/a/b/f',
+    '/a/b/g',
+    '/a/b/x',
+    '/a/b/z',
+]
+
+tree.touch('//shareditem')
+tree.makedirs('//sharedir/item')
+assert [name for name, node in tree.walk('/')] == [
+    '//sharedir/',
+    '//sharedir/item/',
+    '//shareditem',
+    '/a/',
+    '/a/b/',
+    '/a/b/c/',
+    '/a/b/d/',
+    '/a/b/e',
+    '/a/b/f',
+    '/a/b/g',
+    '/a/b/x',
+    '/a/b/z',
+    '/a/y',
+]
