@@ -20,19 +20,17 @@ class DTree(listinit.ListInit):
         """
         for key in ['id', 'name', 'children', 'parents']:
             setattr(self, key+'key', kwargs.get(key+'key', key))
-        self.lut = {'': {self.childrenkey: {}}}
+        self.lut = {'': self.dirnode('')}
         if isinstance(initial, str):
-            with open(initial, 'r') as f:
+            with open(os.path.expanduser(initial), 'r') as f:
                 self.lut = json.load(f)
         elif hasattr(initial, 'read'):
             self.lut = json.load(f)
         elif initial:
             self.lut[''].update(initial)
         self.root = self.lut['']
-        shares = self.root.setdefault(self.childrenkey, {}).setdefault('', {})
+        shares = self.root.setdefault(self.childrenkey, {}).setdefault('', self.dirnode(''))
         shares.setdefault(self.idkey, '')
-        shares.setdefault(self.namekey, 'share')
-        shares.setdefault(self.childrenkey, {})
         self.cwd = os.sep
         return True
 
@@ -106,12 +104,15 @@ class DTree(listinit.ListInit):
             parts = ['  ', os.sep]
         if self.root.get(self.namekey):
             parts.extend([' (', self.root[self.namekey], ')'])
+        special = os.sep*2
         for name, node in self.walk('/'):
             parts.append('\n')
             if name.rstrip(os.sep) == self.cwd:
                 parts.append('* ')
             else:
                 parts.append('  ')
+            if name.startswith(special):
+                parts.append(special)
             split = name.strip(os.sep).split(os.sep)
             for _ in range(len(split)):
                 parts.append('  ')
@@ -140,13 +141,27 @@ class DTree(listinit.ListInit):
             self.cwd = normed
             return
         raise ValueError('{} not a directory'.format(repr(path)))
-    def ls(self, path='.'):
+    def ls(self, path='.', sort=True):
         """Get a list of children or the node."""
         node = self.get(path)
         try:
-            return list(node[self.childrenkey].values())
+            items = node[self.childrenkey].items()
         except KeyError:
-            return node
+            tgt = self.link_target_(node, self.lut)
+            if tgt == node[self.idkey]:
+                return node
+            try:
+                items = self.lut[tgt]
+            except KeyError:
+                raise OSError('link target does not exist.')
+            else:
+                try:
+                    items = items[self.childrenkey].items()
+                except KeyError:
+                    return items
+        if sort:
+            items = sorted(items)
+        return [child for name, child in items if name]
 
     def path(self, node):
         """Calculate the path of this node."""
@@ -169,12 +184,19 @@ class DTree(listinit.ListInit):
         path: a normalized path via self.normpath.
         """
         node = self.root
-        for item in path.split(os.sep)[1+path.endswith(os.sep):]:
-            try:
-                node = node[self.childrenkey][item]
-            except KeyError:
-                return default
-        return node
+        try:
+            for item in path.split(os.sep)[1+path.endswith(os.sep):]:
+                try:
+                    node = node[self.childrenkey][item]
+                except KeyError:
+                    tgt = self.link_target_(node, self.lut)
+                    if tgt == node[self.idkey]:
+                        return default
+                    else:
+                        node = self.lut[tgt][self.childrenkey][item]
+            return node
+        except Exception:
+            return default
     def get(self, path, default=None):
         """Same as get_ but path can be unnormalized."""
         return self.get_(self.normpath(path), default)
@@ -194,7 +216,7 @@ class DTree(listinit.ListInit):
         """
         node = self.root
         made = []
-        parts = path.split(os.sep)[1:]
+        parts = path.split(os.sep)[1+path.endswith(os.sep):]
         for depth, item in enumerate(parts):
             try:
                 children = node[self.childrenkey]
@@ -229,9 +251,11 @@ class DTree(listinit.ListInit):
             if orig is None:
                 dname, bname = os.path.split(path)
                 dnode, made = self.makedirs_(dname)
-                orig = dnode[self.childrenkey].setdefault(node[self.namekey], {})
-                if self.childrenkey in node:
-                    orit.setdefault(self.childrenkey, {})
+                if self.isdir_(node):
+                    orig = self.dirnode(node[self.namekey])
+                else:
+                    orig = self.node(node[self.namekey])
+                dnode[self.childrenkey][node[self.namekey]] = orig
         else:
             orig = self.lut[id]
         self.merge(orig, node)
@@ -315,6 +339,7 @@ class DTree(listinit.ListInit):
 
     def merge(self, old, new):
         """Merge file info dict new into old."""
+        # TODO update self.lut
         for k, v in new.items():
             if k == self.childrenkey:
                 try:
