@@ -347,11 +347,21 @@ class DTree(listinit.ListInit):
                 except KeyError:
                     raise ValueError('Merging dir node into a non-dir node.')
                 for cname, cnode in new[self.childrenkey].items():
-                    if cname in children:
-                        merge(children[cname], cnode)
-                    else:
-                        children[cname] = cnode
+                    onode = children.get(cname)
+                    if onode is None:
+                        if self.isdir_(cnode):
+                            onode = children[cname] = self.dirnode(cname)
+                        else:
+                            onode = children[cname] = self.node(cname)
+                    self.merge(onode, cnode)
+                for cname, cnode in new[self.childrenkey].items():
+                    children[cname] = self.lut[cnode[self.idkey]]
             else:
-                if k in old and v != old[k]:
-                    lg.warning('Changing file value %s: %s -> %s', k, old[k], v)
+                if k in old:
+                    if v != old[k]:
+                        lg.warning('Changing file value %s: %s -> %s', k, old[k], v)
+                        old[k] = v
+                else:
                     old[k] = v
+                if k == self.idkey:
+                    self.lut[v] = old
