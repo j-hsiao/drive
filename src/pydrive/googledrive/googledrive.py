@@ -82,6 +82,9 @@ class Auth(Auth_):
 
 class DTree(DTree_):
     initfuncs = ['_init_None'] + DTree_.initfuncs
+    MIME_FOLDER = 'application/vnd.google-apps.folder'
+    MIME_LINK = 'application/vnd.google-apps.shortcut'
+    LINK_TARGET = ('shortcutDetails', 'targetId')
     def _init_None(self, initial=None, *args, **kwargs):
         if initial is None:
             return self._init(
@@ -89,20 +92,21 @@ class DTree(DTree_):
                 *args, **kwargs)
         return False
 
-    def isdir_(self, node):
+    def isdir_(self, node, link=True):
         """Check if node (dict) is a dir."""
-        return node.get('mimeType') == 'application/vnd.google-apps.folder'
+        if self.childrenkey in node:
+            return True
+        mt = node.get('mimeType')
+        if mt == self.MIME_FOLDER:
+            return True
+        if link and mt == self.MIME_LINK:
+            node = self.lut.get(self.link_target_(node, self.lut))
+            if node is None:
+                return False
+            return self.isdir_(node, False)
+        return False
     def islink_(self, node):
-        return node.get('mimeType') == 'application/vnd.google-apps.shortcut'
-    def link_target_(self, node, lut, full=True):
-        try:
-            tgt = node['shortcutDetails']['targetId']
-        except KeyError:
-            return node['id']
-        if full:
-            return self.link_target(lut[tgt], lut, full)
-        else:
-            return tgt
+        return node.get('mimeType') == self.MIME_LINK
 
     def dirnode(self, name, **kwargs):
         kwargs.setdefault('mimeType', 'application/vnd.google-apps.folder')

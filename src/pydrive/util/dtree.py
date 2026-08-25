@@ -10,6 +10,7 @@ lg = logging.getLogger(__name__)
 
 class DTree(listinit.ListInit):
     """Maintain a local structure of dirs/items."""
+    LINK_TARGET = ('target')
     def _init(self, initial=None, **kwargs):
         """Initialize DTree.
 
@@ -97,7 +98,7 @@ class DTree(listinit.ListInit):
         """Save to out."""
         jutil.save(self.lut, out, **kwargs)
 
-    def __repr__(self):
+    def __str__(self):
         if self.cwd == os.sep:
             parts = ['* ', os.sep]
         else:
@@ -175,7 +176,8 @@ class DTree(listinit.ListInit):
             except KeyError:
                 break
             name = node.get(self.namekey)
-        parts.append('')
+        if name:
+            parts.extend(('', ''))
         return os.sep.join(reversed(parts))
 
     def get_(self, path, default=None):
@@ -288,11 +290,11 @@ class DTree(listinit.ListInit):
             for res in self.walk(cpath, sort=sort, _node=cnode):
                 yield res
 
-    def isdir(self, nodeOrPath):
+    def isdir(self, nodeOrPath, link=True):
         """Check if node or path is a dir."""
         if isinstance(nodeOrPath, str):
             nodeOrPath = self[nodeOrPath]
-        return self.isdir_(nodeOrPath)
+        return self.isdir_(nodeOrPath, link)
 
     def islink(self, nodeOrPath):
         if isinstance(nodeOrPath, str):
@@ -307,26 +309,45 @@ class DTree(listinit.ListInit):
     # ========================
     # implementation specific:
     # ========================
-    def isdir_(self, node):
-        """Check if node (dict) is a dir."""
-        return (
-            self.childrenkey in node
-            or (self.islink_(node) and self.isdir_(node.get('', {})))
-        )
+    def isdir_(self, node, link=True):
+        """Check if node (dict) is a dir.
+
+        node: the node to check
+        link: follow links.
+        """
+        if self.childrenkey in node:
+            return True
+        if link and self.islink_(node):
+            node = self.lut.get(self.link_target_(node, self.lut))
+            if node is None:
+                return False
+            return self.isdir_(node, False)
+        return False
+
     def islink_(self, node):
-        return (
-            '' in node
-            or 'target' in node
-            or 'shortcut' in node.get('mimeType', '').lower()
-        )
-    def link_target_(self, node, lut, full=True):
-        """Calculate the link target"""
         try:
-            tgt = node['target']
+            for k in self.LINK_TARGET:
+                node = node[k]
+            return True
+        except Exception:
+            return False
+
+    def link_target_(self, node, lut, full=True):
+        """Calculate the link target.
+
+        full: fully follow links til non-link.
+        """
+        try:
+            tgt = node
+            for k in self.LINK_TARGET:
+                tgt = tgt[k]
         except KeyError:
             return node[self.idkey]
         if full:
-            return self.link_target_(lut[tgt], lut, full)
+            tnode = lut.get(tgt)
+            if tnode is None:
+                return tgt
+            return self.link_target_(tnode, lut, full)
         else:
             return tgt
 
@@ -349,7 +370,7 @@ class DTree(listinit.ListInit):
                 for cname, cnode in new[self.childrenkey].items():
                     onode = children.get(cname)
                     if onode is None:
-                        if self.isdir_(cnode):
+                        if self.isdir_(cnode, False):
                             onode = children[cname] = self.dirnode(cname)
                         else:
                             onode = children[cname] = self.node(cname)
