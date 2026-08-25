@@ -7,11 +7,11 @@ import pprint
 from pydrive.util import dtree
 
 dummyflat = [
-    dict(name='hello', parents=['1'], id='2'),
+    dict(name='hello', parents=['1'], id='2', children={}),
     dict(name='goodbye', parents=['1'], id='3'),
 
     dict(name='hello', parents=['2'], id='4'),
-    dict(name='goodbye', parents=['2'], id='5'),
+    dict(name='goodbye', parents=['2'], id='5', children={}),
 
     dict(name='standalone', id='6'),
     dict(name='notclobbered', id='6', extra='whatever'),
@@ -21,27 +21,28 @@ dummyflat = [
     dict(name='standalone', id='8'),
     dict(name='notclobbered', id='8', extra='whatever'),
 ]
-lut, roots, dangle = dtree.DTree().parse_parents(dummyflat)
+tree = dtree.DTree()
+roots = tree.update_parents(dummyflat)
 assert roots == ['1']
-assert dangle == set('678')
+assert tree(0) is tree('1')
 
-n1 = lut['1']
-n2 = n1['children']['hello']
-n3 = n1['children']['goodbye']
-n4 = n2['children']['hello']
-n5 = n2['children']['goodbye']
-n9 = n5['children']['shortcut']
+n1 = tree(0)
+n2 = tree.child_(n1, 'hello', lut)
+n3 = tree.child_(n1, 'goodbye', lut)
+n4 = tree.child_(n2, 'hello', lut)
+n5 = tree.child_(n2, 'goodbye', lut)
+n9 = tree.child_(n5, 'shortcut', lut)
 
 assert set('123456789').issubset(lut)
 assert n1 is lut['1']
 assert n2 is lut['2']
 assert n3 is lut['3']
-assert n1['children'] == dict(hello=n2, goodbye=n3)
+assert n1['children'] == dict(hello='2', goodbye='3')
 assert n4 is lut['4']
 assert n5 is lut['5']
-assert n2['children'] == dict(hello=n4, goodbye=n5)
+assert n2['children'] == dict(hello='4', goodbye='5')
 assert n9 is lut['9']
-assert n5['children'] == dict(shortcut=n9)
+assert n5['children'] == dict(shortcut='9')
 
 def normed(l):
     if isinstance(l, str):
