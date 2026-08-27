@@ -8,6 +8,8 @@ from . import listinit
 
 lg = logging.getLogger(__name__)
 
+sroot = os.sep*2
+
 class DTree(listinit.ListInit):
     """Maintain a local structure of dirs/items.
 
@@ -38,7 +40,7 @@ class DTree(listinit.ListInit):
     """
     LINK_TARGET = ('target')
     KEYS = ['id', 'name', 'children', 'parents', 'clash']
-    def _init(self, initial=None, rootname='', **kwargs):
+    def _init(self, initial=None, rootnames='', **kwargs):
         """Initialize DTree.
 
         initial: Dtree initializer.  Another Dtree to copy or a filepath.
@@ -46,7 +48,11 @@ class DTree(listinit.ListInit):
             * can be id, name, children, parents to customize the
             underlying datastructure.
         """
-        self.rootname = rootname
+        if isinstance(rootnames, str):
+            rootnames = [rootnames]
+        self.rootnames = list(rootnames)
+        if '' not in self.rootnames:
+            self.rootnames.append('')
         self.copy_instance(None, **kwargs)
         if isinstance(initial, str):
             with open(os.path.expanduser(initial), 'r') as f:
@@ -180,7 +186,7 @@ class DTree(listinit.ListInit):
     def copy_instance(self, initial, *args, **kwargs):
         """Shallow copy values from another dtree."""
         if initial is not None:
-            for attr in ('lut', 'cwd'):
+            for attr in ('lut', 'cwd', 'rootnames'):
                 setattr(self, kwargs.get(attr, getattr(initial, attr)))
         for key in self.KEYS:
             keyname = key+'key'
@@ -222,6 +228,8 @@ class DTree(listinit.ListInit):
         """Normalize path to absolute."""
         if path is None or path == '.':
             return self.cwd
+        if path.startswith('@') and not path.startswith('@@'):
+            return path
         return os.path.normpath(os.path.join(self.cwd, path))
 
     def cd(self, path):
@@ -272,22 +280,74 @@ class DTree(listinit.ListInit):
             parts.extend(('', ''))
         return os.sep.join(reversed(parts))
 
+    def find_root(self, path):
+        """Find the root node to use for this path."""
+        node = self.lut[0]
+        if not path.startswith(sroot):
+            children = node[self.childrenkey]
+            for candidate in self.rootnames:
+                try:
+                    return self.lut[children[candidate]]
+                except KeyError:
+                    pass
+            for k, v in sorted(children.items()):
+                try:
+                    return self.lut[v]
+                except KeyError:
+                    pass
+        return node
+
     def get_(self, path, default=None):
         """Return an item from normalized path.
 
         path: a normalized path via self.normpath.
+        A path component can also consist of special values:
+            @id
+            name[int-index]
+        To start with a literal @, use @@
+        To end with a literal ], end with ]]
         """
-        node = self.lut[0]
+        node = self.find_root(path)
         try:
-            for item in path.split(os.sep)[1+path.endswith(os.sep):]:
+            for item in filter(None, path.split(os.sep)):
                 try:
-                    node = node[self.childrenkey][item]
+                    node = self.lut[self.link_target_(node, self.lut)]
                 except KeyError:
-                    tgt = self.link_target_(node, self.lut)
-                    if tgt == node[self.idkey]:
-                        return default
+                    return default
+                if item.startswith('@'):
+                    # TODO is it possible for id to start with an @ as well?
+                    if item.startswith('@@'):
+                        item = item[1:]
                     else:
-                        node = self.lut[tgt][self.childrenkey][item]
+                        try:
+                            node = self.lut[item[1:]]
+                        except KeyError:
+                            return default
+                        else:
+                            continue
+                if item.endswith(']')
+                    if item.endswith(']]'):
+                        item = item[:-1]
+                    else:
+                        name, idx = item.rsplit('[', 1)
+                        try:
+                            idx = int(idx[:-1])
+                        except ValueError:
+                            pass
+                        else:
+                            try:
+                                node = self.lut[node[self.clashkey][name][idx]]
+                            except (KeyError, IndexError, TypeError):
+                                if idx == 0:
+                                    item = name
+                                else:
+                                    return default
+                            else:
+                                continue
+                try:
+                    node = self.lut[node[self.childrenkey][item]]
+                except KeyError:
+                    return default
             return node
         except Exception:
             lg.exception('Error searching for %s', path)
@@ -474,12 +534,11 @@ class DTree(listinit.ListInit):
         full: fully follow links til non-link.
         """
         while 1:
-            try:
-                tgt = node
-                for k in self.LINK_TARGET:
-                    tgt = tgt[k]
-            except KeyError:
-                return node[self.idkey]
+            tgt = node
+            for k in self.LINK_TARGET:
+                tgt = tgt.get(k)
+                if tgt is None:
+                    return node[self.idkey]
             if full:
                 try:
                     node = self.lut[tgt]
