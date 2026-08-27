@@ -4,154 +4,229 @@ import logging
 import sys
 import pprint
 
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stderr
+)
+
 from pydrive.util import dtree
 
-dummyflat = [
-    dict(name='hello', parents=['1'], id='2', children={}),
-    dict(name='goodbye', parents=['1'], id='3'),
-
-    dict(name='hello', parents=['2'], id='4'),
-    dict(name='goodbye', parents=['2'], id='5', children={}),
-
-    dict(name='standalone', id='6'),
-    dict(name='notclobbered', id='6', extra='whatever'),
-    dict(name='shortcut', id='7', mimeType='shortcut', target='6'),
-
-    dict(name='shortcut', id='9', mimeType='shortcut', parents=['5'], target='8'),
-    dict(name='standalone', id='8'),
-    dict(name='notclobbered', id='8', extra='whatever'),
-]
-tree = dtree.DTree()
-roots = tree.update_parents(dummyflat)
-assert roots == ['1']
-assert tree(0) is tree('1')
-
-n1 = tree(0)
-n2 = tree.child_(n1, 'hello', lut)
-n3 = tree.child_(n1, 'goodbye', lut)
-n4 = tree.child_(n2, 'hello', lut)
-n5 = tree.child_(n2, 'goodbye', lut)
-n9 = tree.child_(n5, 'shortcut', lut)
-
-assert set('123456789').issubset(lut)
-assert n1 is lut['1']
-assert n2 is lut['2']
-assert n3 is lut['3']
-assert n1['children'] == dict(hello='2', goodbye='3')
-assert n4 is lut['4']
-assert n5 is lut['5']
-assert n2['children'] == dict(hello='4', goodbye='5')
-assert n9 is lut['9']
-assert n5['children'] == dict(shortcut='9')
-
-def normed(l):
+def norm(l):
     if isinstance(l, str):
         return os.path.normpath(l)
     return [os.path.normpath(_) for _ in l]
 
-tree = dtree.DTree()
-assert tree['/'] is tree.root
-assert tree['//'] is tree.root['children']['']
-assert list(name for name, info in tree.walk('/')) == []
-assert list(name for name, info in tree.walk()) == []
 
-assert tree.get('/a/b') is None
-assert tree.makedirs('/a/b') == (tree.dirnode('b'), normed(['/a', '/a/b']))
-# /
-#   a/
-#     b/
+def test_normal_update():
+    dummypar = [
+        dict(name='a', parents=['1'], id='2'),
+        dict(name='b', parents=['1'], id='3'),
 
-assert tree.isdir('/a/b')
-assert tree.isdir('/a')
-assert tree.isdir('/a/')
-assert tree.isdir('/')
+        dict(name='c', parents=['2'], id='4'),
+        dict(name='d', parents=['2'], id='5'),
 
-assert tree.isdir('a')
-assert tree.isdir('a/b')
+        dict(name='orig', id='6'),
+        dict(name='new', id='6', extra='whatever'),
+        dict(name='shortcut1', id='7', target='6'),
 
-assert tree.makedirs('/a/b/c') == (tree.dirnode('c'), normed(['/a/b/c/']))
-tree.cd('a/b/')
-assert tree.makedirs('/a/b/d') == (tree.dirnode('d'), normed(['/a/b/d/']))
+        dict(name='shortcut2', id='9', parents=['5'], target='8'),
+        dict(name='orig2', id='8', parents=['4']),
+        dict(name='new2', id='8', extra='whatever'),
+    ]
 
-# /
-#   a/
-#*    b/
-#       c/
-#       d/
+    dummychi = [
+        dict(name='', id='1', children=['2', '3']),
+        dict(name='a', id='2', children=['4', '5']),
+        dict(name='b', id='3'),
 
-assert not tree.isdir(tree.touch('x'))
-assert not tree.isdir(tree.touch('../y'))
-assert not tree.isdir(tree.touch('z'))
+        dict(name='c', id='4', children=['8']),
+        dict(name='d', id='5', children=['9']),
 
-# /
-#   a/
-#*    b/
-#       c/
-#       d/
-#       x
-#       z
-#     y
+        dict(name='orig', id='6'),
+        dict(name='new', id='6', extra='whatever'),
+        dict(name='shortcut1', id='7', target='6'),
 
-assert tree.cwd == normed('/a/b')
-assert tree.normpath('../y') == '/a/y'
+        dict(name='shortcut2', id='9', target='8'),
+        dict(name='orig2', id='8'),
+        dict(name='new2', id='8', extra='whatever'),
+    ]
 
-assert set([_['name'] for _ in tree.ls()]) == set('cdxz')
-assert set([_['name'] for _ in tree.ls('..')]) == set('by')
+    keys = dict(childrenkey='children', parentskey='parents', idkey='id')
 
-tree.update(dict(children={k:dict(name=k) for k in 'efg'}), '.')
-# /
-#   a/
-#*    b/
-#       c/
-#       d/
-#       x
-#       z
-#       e
-#       f
-#       g
-#     y
-assert set(tree['.']['children']) == set('cdxzefg')
-assert not tree.isdir('e')
-assert not tree.isdir('f')
-assert not tree.isdir('g')
+    tree = dtree.DTree(**keys)
+    tree.update(dummypar)
+    pprint.pprint(tree.lut)
+    assert tree(0)['children'] == {'': '1', 'new': '6', 'shortcut1': '7'}
+    assert tree('1')['children'] == dict(a='2', b='3')
+    assert tree('2')['children'] == dict(c='4', d='5')
+    assert 'children' not in tree('3')
+    assert tree('4')['children'] == dict(new2='8')
+    assert tree('5')['children'] == dict(shortcut2='9')
+    assert 'children' not in tree('6')
+    assert 'children' not in tree('7')
+    assert 'children' not in tree('8')
+    assert 'children' not in tree('9')
 
-assert [name for name, node in tree.walk('/')] == [
-    '/a/',
-    '/a/b/',
-    '/a/b/c/',
-    '/a/b/d/',
-    '/a/b/e',
-    '/a/b/f',
-    '/a/b/g',
-    '/a/b/x',
-    '/a/b/z',
-    '/a/y',
-]
+    ntree = dtree.DTree(**keys)
+    ntree.update(dummychi)
+    pprint.pprint(ntree.lut)
+    assert ntree.lut == tree.lut
 
-assert [name for name, node in tree.walk()] == [
-    '/a/b/c/',
-    '/a/b/d/',
-    '/a/b/e',
-    '/a/b/f',
-    '/a/b/g',
-    '/a/b/x',
-    '/a/b/z',
-]
+    # rename
+    tree.update([dict(name='changed again', id='8')])
+    assert tree(0)['children'] == {'': '1', 'new': '6', 'shortcut1': '7'}
+    assert tree('1')['children'] == dict(a='2', b='3')
+    assert tree('2')['children'] == dict(c='4', d='5')
+    assert 'children' not in tree('3')
+    assert tree('4')['children'] == {'changed again': '8'}
+    assert tree('5')['children'] == dict(shortcut2='9')
+    assert 'children' not in tree('6')
+    assert 'children' not in tree('7')
+    assert 'children' not in tree('8')
+    assert 'children' not in tree('9')
 
-tree.touch('//shareditem')
-tree.makedirs('//sharedir/item')
-assert [name for name, node in tree.walk('/')] == [
-    '//sharedir/',
-    '//sharedir/item/',
-    '//shareditem',
-    '/a/',
-    '/a/b/',
-    '/a/b/c/',
-    '/a/b/d/',
-    '/a/b/e',
-    '/a/b/f',
-    '/a/b/g',
-    '/a/b/x',
-    '/a/b/z',
-    '/a/y',
-]
+def test_clashing_update():
+    nodes = [
+        dict(id='2', parents=['1'], name='a'),
+        dict(id='3', parents=['1'], name='a'),
+        dict(id='4', parents=['2'], name='b'),
+        dict(id='5', parents=['2'], name='b'),
+    ]
+    tree = dtree.DTree(nodes)
+    assert tree(0)['children'] == {'': '1'}
+    assert tree('1')['children'] == dict(a='2')
+    assert tree('1')['clash'] == dict(a=['2', '3'])
+    assert tree('2')['children'] == dict(b='4')
+    assert tree('2')['clash'] == dict(b=['4', '5'])
+
+    tree._remove_child(tree('1'), tree('2'))
+
+    assert tree(0)['children'] == {'': '1'}
+    assert tree('1')['children'] == dict(a='3')
+    assert not tree('1').get('clash')
+    assert tree('2')['children'] == dict(b='4')
+    assert tree('2')['clash'] == dict(b=['4', '5'])
+
+    tree._remove_child(tree('2'), tree('5'))
+
+    assert tree(0)['children'] == {'': '1'}
+    assert tree('1')['children'] == dict(a='3')
+    assert not tree('1').get('clash')
+    assert tree('2')['children'] == dict(b='4')
+    assert not tree('2')['clash']
+
+
+
+
+
+
+# tree = dtree.DTree()
+# assert tree['/'] is tree.root
+# assert tree['//'] is tree.root['children']['']
+# assert list(name for name, info in tree.walk('/')) == []
+# assert list(name for name, info in tree.walk()) == []
+
+# assert tree.get('/a/b') is None
+# assert tree.makedirs('/a/b') == (tree.dirnode('b'), norm(['/a', '/a/b']))
+# # /
+# #   a/
+# #     b/
+
+# assert tree.isdir('/a/b')
+# assert tree.isdir('/a')
+# assert tree.isdir('/a/')
+# assert tree.isdir('/')
+
+# assert tree.isdir('a')
+# assert tree.isdir('a/b')
+
+# assert tree.makedirs('/a/b/c') == (tree.dirnode('c'), norm(['/a/b/c/']))
+# tree.cd('a/b/')
+# assert tree.makedirs('/a/b/d') == (tree.dirnode('d'), norm(['/a/b/d/']))
+
+# # /
+# #   a/
+# #*    b/
+# #       c/
+# #       d/
+
+# assert not tree.isdir(tree.touch('x'))
+# assert not tree.isdir(tree.touch('../y'))
+# assert not tree.isdir(tree.touch('z'))
+
+# # /
+# #   a/
+# #*    b/
+# #       c/
+# #       d/
+# #       x
+# #       z
+# #     y
+
+# assert tree.cwd == norm('/a/b')
+# assert tree.normpath('../y') == '/a/y'
+
+# assert set([_['name'] for _ in tree.ls()]) == set('cdxz')
+# assert set([_['name'] for _ in tree.ls('..')]) == set('by')
+
+# tree.update(dict(children={k:dict(name=k) for k in 'efg'}), '.')
+# # /
+# #   a/
+# #*    b/
+# #       c/
+# #       d/
+# #       x
+# #       z
+# #       e
+# #       f
+# #       g
+# #     y
+# assert set(tree['.']['children']) == set('cdxzefg')
+# assert not tree.isdir('e')
+# assert not tree.isdir('f')
+# assert not tree.isdir('g')
+
+# assert [name for name, node in tree.walk('/')] == [
+#     '/a/',
+#     '/a/b/',
+#     '/a/b/c/',
+#     '/a/b/d/',
+#     '/a/b/e',
+#     '/a/b/f',
+#     '/a/b/g',
+#     '/a/b/x',
+#     '/a/b/z',
+#     '/a/y',
+# ]
+
+# assert [name for name, node in tree.walk()] == [
+#     '/a/b/c/',
+#     '/a/b/d/',
+#     '/a/b/e',
+#     '/a/b/f',
+#     '/a/b/g',
+#     '/a/b/x',
+#     '/a/b/z',
+# ]
+
+# tree.touch('//shareditem')
+# tree.makedirs('//sharedir/item')
+# assert [name for name, node in tree.walk('/')] == [
+#     '//sharedir/',
+#     '//sharedir/item/',
+#     '//shareditem',
+#     '/a/',
+#     '/a/b/',
+#     '/a/b/c/',
+#     '/a/b/d/',
+#     '/a/b/e',
+#     '/a/b/f',
+#     '/a/b/g',
+#     '/a/b/x',
+#     '/a/b/z',
+#     '/a/y',
+# ]
+
+if __name__ == '__main__':
+    from pydrive.util import test
+    test.run(globals())

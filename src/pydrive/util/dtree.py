@@ -2,7 +2,6 @@
 import json
 import logging
 import os
-import uuid
 
 from . import jutil
 from . import listinit
@@ -23,9 +22,23 @@ class DTree(listinit.ListInit):
     for all (potential) roots.
     There might or might not be an explicit (main) root.
     roots don't have parents and are represented as '//rootname'.
+
+
+    Nodes can generally be a file, dir, or link.
+    file: a basic node.  Has id, name, parents
+    dir: a file node but also has children and clash key
+    link: a file node with a `LINK_TARGET` id.
+
+    Basic keys:
+    id: an identifying string, could be path, innode, etc.
+    name: str, the name of the node
+    parents: [parentids,...]
+    children: dict[childname]: childid required for dirs
+    clash: dict[childname]: [idlist], dir only, optional, child ids with same name.
     """
     LINK_TARGET = ('target')
-    def _init(self, initial=None, **kwargs):
+    KEYS = ['id', 'name', 'children', 'parents', 'clash']
+    def _init(self, initial=None, rootname='', **kwargs):
         """Initialize DTree.
 
         initial: Dtree initializer.  Another Dtree to copy or a filepath.
@@ -33,16 +46,23 @@ class DTree(listinit.ListInit):
             * can be id, name, children, parents to customize the
             underlying datastructure.
         """
-        for key in ['id', 'name', 'children', 'parents']:
-            setattr(self, key+'key', kwargs.get(key+'key', key))
+        self.rootname = rootname
+        self.copy_instance(None, **kwargs)
         if isinstance(initial, str):
             with open(os.path.expanduser(initial), 'r') as f:
                 self.lut = json.load(f)
         elif hasattr(initial, 'read'):
             self.lut = json.load(f)
         else:
-            self.lut = {0: self.dirnode(''), '': self.dirnode('')}
-            self.lut[0][self.childrenkey][''] = ''
+            self.lut = {0: self.dirnode('', (self.idkey, 0))}
+            if initial:
+                if isinstance(initial, dict):
+                    if 0 in initial:
+                        self.lut = initial
+                    else:
+                        self.update([initial])
+                else:
+                    self.update(initial)
         self.cwd = os.sep
         return True
 
@@ -52,8 +72,10 @@ class DTree(listinit.ListInit):
         files: list of file info (dict).  Each item should have keys:
             self.idkey and self.namekey are required.
             self.parentskey is optional.
-
         Each file will have parents/children key added as necessary.
+
+        For convenience, update allows `childrenkey` to be a sequence of ids
+        instead of a dict.
         """
         lut = self.lut
         idkey = self.idkey
@@ -67,42 +89,102 @@ class DTree(listinit.ListInit):
             if not isinstance(itemid, str):
                 item[idkey] = itemid = str(itemid)
             prev = lut.setdefault(itemid, item)
-            if self.isdir_(prev, False):
-                prev.setdefault(childrenkey, {})
             if prev is not item:
-                self.merge(prev, item)
-            else:
-                q.append(prev)
-        for item in q:
-            itemid = item[idkey]
+                lg.info('merging %s, %s << %s', itemid, prev, item)
+                self._merge(prev, item)
+                if itemid in q:
+                    continue
+            q.append(itemid)
+        for itemid in q:
+            item = lut[itemid]
+            lg.info('updating %s', item)
             name = item[namekey]
             try:
                 parents = item[parentskey]
             except KeyError:
-                self._link_child(lut[0], item)
+                self._add_child(lut[0], item)
             else:
                 for parentid in parents:
                     try:
                         parnode = lut[parentid]
                     except KeyError:
-                        parnode = lut[parentid] = self.dirnode('')
-                        parnode[idkey] = parentid
-                        self._link_child(lut[0], parnode)
-                    self._link_child(parnode, item)
+                        parnode = lut[parentid] = self.dirnode('', (idkey, parentid))
+                        self._add_child(lut[0], parnode)
+                    self._add_child(parnode, item)
             children = item.get(childrenkey)
             if children is not None:
-                for childid in children.values():
-                    child = lut[childid]
+                if not isinstance(children, dict):
+                    childids = children
+                    item[childrenkey] = {}
+                else:
+                    childids = list(children.values())
+                for childid in childids:
+                    child = lut.get(childid)
                     if child is not None:
-                        self._link_child(item, child)
-        if '' in lut[0][childrenkey]:
-            lut[''] = lut[lut[0][childrenkey]['']]
-        return roots
+                        self._add_child(item, child)
+
+    def _merge(self, old, new):
+        """Merge new node data into old node.
+
+        Break any relevant parent/child connections.
+        """
+        for k, v in new.items():
+            try:
+                pre = old[k]
+            except KeyError:
+                pass
+            else:
+                if v != pre:
+                    if k == self.idkey:
+                        raise ValueError('Should never be merging nodes with different id.')
+                    elif k == self.namekey:
+                        continue
+                    lg.warning(
+                        'Changing file value %s for %s: %s -> %s',
+                        k, old[self.idkey], pre, v)
+                    if k == self.parentskey:
+                        for parentid in set(pre).difference(v):
+                            parent = self.lut.get(parentid)
+                            if parent is not None:
+                                self._remove_child(parent, old)
+                    elif k == self.childrenkey:
+                        if isinstance(v, dict):
+                            nchildids = set(v.values())
+                        else:
+                            nchildids = set(v)
+                        ochildids = set(pre.values())
+                        clash = old.get(self.clashkey)
+                        if clash is not None:
+                            ochildids.update(*clash.values())
+                        for childid in ochildids.difference(nchildids):
+                            child = self.lut.get(childid)
+                            if child is not None:
+                                self._remove_child(old, child)
+            old[k] = v
+        newname = new.get(self.namekey)
+        if newname is None or old[self.namekey] == newname:
+            return
+        parents = old.get(self.parentskey)
+        if parents is not None:
+            parents = list(parents)
+            for parentid in parents:
+                parent = self.lut.get(parentid)
+                if parent is None:
+                    continue
+                self._remove_child(parent, old)
+            old[self.parentskey] = parents
+        lg.warning('Changing file name for %s: %s -> %s', old[self.idkey], old[self.namekey], newname)
+        old[self.namekey] = newname
+
 
     def copy_instance(self, initial, *args, **kwargs):
         """Shallow copy values from another dtree."""
-        for attr in ('lut', 'cwd', 'idkey', 'namekey', 'childrenkey', 'parentskey'):
-            setattr(self, kwargs.get(attr, getattr(initial, attr)))
+        if initial is not None:
+            for attr in ('lut', 'cwd'):
+                setattr(self, kwargs.get(attr, getattr(initial, attr)))
+        for key in self.KEYS:
+            keyname = key+'key'
+            setattr(self, keyname, kwargs.get(keyname, key))
 
     def save(self, out, **kwargs):
         """Save to out."""
@@ -253,28 +335,6 @@ class DTree(listinit.ListInit):
         """Touch a file by non-normalized path."""
         return self.touch_(self.normpath(path))
 
-    def update_(self, node, path=None, id=None):
-        """Update an entry.
-
-        path: the path to the entry
-        node: the info to update
-        """
-        if id is None:
-            orig = self.get_(path)
-            if orig is None:
-                dname, bname = os.path.split(path)
-                dnode, made = self.makedirs_(dname)
-                if self.isdir_(node):
-                    orig = self.dirnode(node[self.namekey])
-                else:
-                    orig = self.node(node[self.namekey])
-                dnode[self.childrenkey][node[self.namekey]] = orig
-        else:
-            orig = self.lut[id]
-        self.merge(orig, node)
-    def update(self, node, path=None, id=None):
-        return self.update_(node, self.normpath(path), id)
-
     def walk(self, path='.', sort=True, _node=None):
         """Walk through all descendents of the given path."""
         if _node is None:
@@ -322,22 +382,57 @@ class DTree(listinit.ListInit):
     def child_(self, node, childname, lut):
         return lut[node[self.childrenkey][childname]]
 
-
-    def _link_child(self, parent, child):
+    def _add_child(self, parent, child):
+        """Add connection from parent to child."""
         cid = child[self.idkey]
         pid = parent[self.idkey]
         cname = child[self.namekey]
-        children = parent[self.childrenkey]
-        if children.setdefault(cname, cid) != cid:
+        children = parent.setdefault(self.childrenkey, {})
+        precid = children.setdefault(cname, cid)
+        if precid != cid:
             lg.warning(
                 'Multiple files with same name %s: %s vs %s',
-                cname, children[cname], cid)
-            children['_'.join([cname, uuid.uuid4().hex])] = cid
-
-        parents = child.setdefaults(self.parentskey, [])
+                cname, precid, cid)
+            clashes = parent.setdefault(self.clashkey, {})
+            clashlist = clashes.setdefault(cname, [precid])
+            if cid not in clashlist:
+                clashlist.append(cid)
+        parents = child.setdefault(self.parentskey, [])
         if pid not in parents:
             parents.append(pid)
+            if pid != 0 and 0 in parents:
+                self._remove_child(self.lut[0], child)
 
+    def _remove_child(self, parent, child):
+        """Disconnect child from parent."""
+        cid = child[self.idkey]
+        pid = parent[self.idkey]
+        cname = child[self.namekey]
+        children = parent.get(self.childrenkey)
+        if children is not None:
+            newchild = None
+            precid = children.get(cname)
+            clashes = parent.get(self.clashkey)
+            if clashes is not None:
+                cclashes = clashes.get(cname)
+                if cclashes is not None:
+                    if cid in cclashes:
+                        cclashes.remove(cid)
+                    if cclashes:
+                        newchild = cclashes[0]
+                    if len(cclashes) <= 1:
+                        del clashes[cname]
+            if precid != cid:
+                newchild = precid
+            if newchild is None:
+                del children[cname]
+            else:
+                children[cname] = newchild
+        parents = child.get(self.parentskey)
+        if parents is not None and pid in parents:
+            parents.remove(pid)
+            if not parents:
+                del child[self.parentskey]
 
     # ========================
     # implementation specific:
@@ -350,10 +445,18 @@ class DTree(listinit.ListInit):
         """
         if self.childrenkey in node:
             return True
-        if link and self.islink_(node):
-            node = self.lut.get(self.link_target_(node, self.lut))
-            if node is None:
-                return False
+        if link:
+            tgt = node
+            while 1:
+                try:
+                    for k in self.LINK_TARGET:
+                        tgt = tgt[k]
+                except KeyError:
+                    return self.childrenkey in tgt
+                try:
+                    tgt = self.lut[tgt]
+                except KeyError:
+                    return False
             return self.isdir_(node, False)
         return False
 
@@ -370,47 +473,28 @@ class DTree(listinit.ListInit):
 
         full: fully follow links til non-link.
         """
-        try:
-            tgt = node
-            for k in self.LINK_TARGET:
-                tgt = tgt[k]
-        except KeyError:
-            return node[self.idkey]
-        if full:
-            tnode = lut.get(tgt)
-            if tnode is None:
-                return tgt
-            return self.link_target_(tnode, lut, full)
-        else:
-            return tgt
-
-    def node(self, name, **kwargs):
-        kwargs[self.namekey] = name
-        return kwargs
-    def dirnode(self, name, **kwargs):
-        kwargs.setdefault(self.childrenkey , {})
-        return self.node(name, **kwargs)
-
-    def merge(self, old, new):
-        """Merge file info dict new into old."""
-        for k, v in new.items():
-            if k == self.childrenkey:
+        while 1:
+            try:
+                tgt = node
+                for k in self.LINK_TARGET:
+                    tgt = tgt[k]
+            except KeyError:
+                return node[self.idkey]
+            if full:
                 try:
-                    children = old[self.childrenkey]
+                    node = self.lut[tgt]
                 except KeyError:
-                    lg.warning('Merge target is not dirlike: %s vs %s', old, new)
-                    old[k] = v
-                else:
-                    for ck, cv in v.items():
-                        if children.setdefault(ck, cv) is not cv and children[ck] != cv:
-                            lg.warning('Merged child %s of %s, ids are different: %s vs %s', ck, old[self.namekey], children[ck], cv)
-                            children['_'.join([ck, uuid.uuid4().hex])] = cv
+                    return tgt
             else:
-                try:
-                    pre = old[k]
-                except KeyError:
-                    pass
-                else:
-                    if v != pre:
-                        lg.warning('Changing file value %s: %s -> %s', k, pre, v)
-                old[k] = v
+                return tgt
+
+    def node(self, name, *args, **kwargs):
+        """Create a node dict."""
+        kwargs[self.namekey] = name
+        for k, v in args:
+            kwargs[k] = v
+        return kwargs
+    def dirnode(self, name, *args, **kwargs):
+        """Create a dir node dict."""
+        kwargs.setdefault(self.childrenkey , {})
+        return self.node(name, *args, **kwargs)
