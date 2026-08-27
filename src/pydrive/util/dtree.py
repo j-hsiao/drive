@@ -301,11 +301,11 @@ class DTree(listinit.ListInit):
         """Return an item from normalized path.
 
         path: a normalized path via self.normpath.
-        A path component can also consist of special values:
-            @id
-            name[int-index]
-        To start with a literal @, use @@
-        To end with a literal ], end with ]]
+            Each path component has some extra processing:
+            @:id specifies an id explicitly.
+            name[index] specifies an alternative (clashed name)
+            @@* ignores @:id processing and compresses the initial @@ to a single @.
+            *]] ignores name[index] processing and compresses last ]] to a single ].
         """
         node = self.find_root(path)
         try:
