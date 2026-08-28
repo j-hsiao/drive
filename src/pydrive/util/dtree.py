@@ -228,7 +228,7 @@ class DTree(listinit.ListInit):
         """Normalize path to absolute."""
         if path is None or path == '.':
             return self.cwd
-        if path.startswith('@') and not path.startswith('@@'):
+        elif path.startswith('@:'):
             return path
         return os.path.normpath(os.path.join(self.cwd, path))
 
@@ -242,27 +242,27 @@ class DTree(listinit.ListInit):
             self.cwd = normed
             return
         raise ValueError('{} not a directory'.format(repr(path)))
-    def ls(self, path='.', sort=True):
+    def ls(self, path='.', sort=True, alts=False):
         """Get a list of children or the node."""
         node = self.get(path)
         try:
             items = node[self.childrenkey].items()
         except KeyError:
-            tgt = self.link_target_(node, self.lut)
-            if tgt == node[self.idkey]:
-                return node
             try:
-                items = self.lut[tgt]
+                node = self.lut[self.link_target_(node, self.lut)]
+                items = node[self.childrenkey].items()
             except KeyError:
-                raise OSError('link target does not exist.')
-            else:
-                try:
-                    items = items[self.childrenkey].items()
-                except KeyError:
-                    return items
-        if sort:
+                return node
+        if alts:
+            items = list(items)
+            for k, alts in node.get(self.clashkey, {}).items():
+                for alt in alts:
+                    items.append((k, self.lut[alt]))
+            if sort:
+                items.sort()
+        elif sort:
             items = sorted(items)
-        return [child for name, child in items if name]
+        return [child for name, child in items]
 
     def path(self, node):
         """Calculate the path of this node."""
@@ -302,56 +302,56 @@ class DTree(listinit.ListInit):
 
         path: a normalized path via self.normpath.
             Each path component has some extra processing:
+            @@* suppress @:id parsing and remove initial @.
+            *]] suppress name[index] parsing and remove last ]
             @:id specifies an id explicitly.
             name[index] specifies an alternative (clashed name)
-            @@* ignores @:id processing and compresses the initial @@ to a single @.
-            *]] ignores name[index] processing and compresses last ]] to a single ].
+
+        Examples:
+        component       meaning
+        -----------------------
+        something       name is 'something'
+        @whatever       name is '@whatever'
+        @:whatever      id is 'whatever'
+        @@whatever      name is '@whatever'
+        @@:whatever     name is '@:whatever'
+        name[0]         0th alternative of name (same as 'name')
+        name[1]         1st alternative of name.
+        name[1]]        name is 'name[1]'
+        @:name[0]       id is 'name[0]'
+        @@:name[0]      0th alternative of '@:name'
+        @@:name[0]]     name is '@:name[0]'
         """
         node = self.find_root(path)
         try:
             for item in filter(None, path.split(os.sep)):
-                try:
-                    node = self.lut[self.link_target_(node, self.lut)]
-                except KeyError:
-                    return default
-                if item.startswith('@'):
-                    # TODO is it possible for id to start with an @ as well?
-                    if item.startswith('@@'):
-                        item = item[1:]
+                node = self.lut[self.link_target_(node, self.lut)]
+                if item.startswith('@@'):
+                    item = item[1:]
+                elif item.startswith('@:'):
+                    node = self.lut[item[2:]]
+                    continue
+                if item.endswith(']]'):
+                    item = item[:-1]
+                elif item.endswith(']'):
+                    name, idx = item.rsplit('[', 1)
+                    try:
+                        idx = int(idx[:-1])
+                    except ValueError:
+                        pass
                     else:
-                        try:
-                            node = self.lut[item[1:]]
-                        except KeyError:
-                            return default
+                        if idx == 0:
+                            item = name
                         else:
+                            node = self.lut[node[self.clashkey][name][idx]]
                             continue
-                if item.endswith(']')
-                    if item.endswith(']]'):
-                        item = item[:-1]
-                    else:
-                        name, idx = item.rsplit('[', 1)
-                        try:
-                            idx = int(idx[:-1])
-                        except ValueError:
-                            pass
-                        else:
-                            try:
-                                node = self.lut[node[self.clashkey][name][idx]]
-                            except (KeyError, IndexError, TypeError):
-                                if idx == 0:
-                                    item = name
-                                else:
-                                    return default
-                            else:
-                                continue
-                try:
-                    node = self.lut[node[self.childrenkey][item]]
-                except KeyError:
-                    return default
+                node = self.lut[node[self.childrenkey][item]]
             return node
+        except KeyError:
+            pass
         except Exception:
             lg.exception('Error searching for %s', path)
-            return default
+        return default
     def get(self, path, default=None):
         """Same as get_ but path can be unnormalized."""
         return self.get_(self.normpath(path), default)

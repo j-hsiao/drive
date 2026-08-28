@@ -5,9 +5,10 @@ import sys
 import pprint
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get('LOGLEVEL', 'WARNING').upper(), logging.WARNING),
     stream=sys.stderr
 )
+lg = logging.getLogger(__name__)
 
 from pydrive.util import dtree
 
@@ -18,6 +19,16 @@ def norm(l):
 
 
 def test_normal_update():
+    # //
+    #   new
+    #   shortcut1 -> //new
+    #   /
+    #     a/
+    #       c/
+    #         new2
+    #       d/
+    #         shortcut2 -> /a/c/new2
+    #     b
     dummypar = [
         dict(name='a', parents=['1'], id='2'),
         dict(name='b', parents=['1'], id='3'),
@@ -55,7 +66,7 @@ def test_normal_update():
 
     tree = dtree.DTree(**keys)
     tree.update(dummypar)
-    pprint.pprint(tree.lut)
+    lg.info('parent tree\n%s', pprint.pformat(tree.lut))
     assert tree(0)['children'] == {'': '1', 'new': '6', 'shortcut1': '7'}
     assert tree('1')['children'] == dict(a='2', b='3')
     assert tree('2')['children'] == dict(c='4', d='5')
@@ -66,10 +77,37 @@ def test_normal_update():
     assert 'children' not in tree('7')
     assert 'children' not in tree('8')
     assert 'children' not in tree('9')
+    for i in range(1, 10):
+        assert tree(str(i)) is tree['@:{}'.format(i)]
+        assert tree(str(i)) is tree['/a/c/@:{}'.format(i)]
+
+    assert tree('1') is tree['//[0]']
+    assert tree('1') is tree['/']
+    assert tree('2') is tree['//[0]/a']
+    assert tree('2') is tree['/a']
+    assert tree('2') is tree['a']
+    assert tree('3') is tree['//[0]/b']
+    assert tree('3') is tree['/b']
+    assert tree('3') is tree['b']
+    assert tree('4') is tree['//[0]/a/c']
+    assert tree('4') is tree['/a/c']
+    assert tree('4') is tree['a/c']
+    assert tree('5') is tree['//[0]/a/d']
+    assert tree('5') is tree['/a/d']
+    assert tree('5') is tree['a/d']
+    assert tree('6') is tree['//new']
+    assert tree('6') is tree['//new[0]']
+    assert tree('7') is tree['//shortcut1']
+    assert tree('7') is tree['//shortcut1[0]']
+    assert tree('8') is tree['//[0]/a/c/new2']
+    assert tree('8') is tree['/a/c/new2']
+    assert tree('8') is tree['a/c/new2']
+    assert tree('9') is tree['/a/d/shortcut2']
+    assert tree('9') is tree['//[0]/a/d/shortcut2']
 
     ntree = dtree.DTree(**keys)
     ntree.update(dummychi)
-    pprint.pprint(ntree.lut)
+    lg.info('child tree\n%s', pprint.pformat(ntree.lut))
     assert ntree.lut == tree.lut
 
     # rename
