@@ -38,7 +38,7 @@ class DTree(listinit.ListInit):
     children: dict[childname]: childid required for dirs
     clash: dict[childname]: [idlist], dir only, optional, child ids with same name.
     """
-    LINK_TARGET = ('target')
+    LINK_TARGET = ['target']
     KEYS = ['id', 'name', 'children', 'parents', 'clash']
     def _init(self, initial=None, rootnames='', **kwargs):
         """Initialize DTree.
@@ -254,15 +254,21 @@ class DTree(listinit.ListInit):
             except KeyError:
                 return node
         if alts:
-            items = list(items)
-            for k, alts in node.get(self.clashkey, {}).items():
-                for alt in alts:
-                    items.append((k, self.lut[alt]))
+            alts = node.get(self.clashkey, {})
+            nitems = []
+            for k, v in items:
+                namealts = alts.get(k)
+                if namealts:
+                    for altid in namealts:
+                        nitems.append((k, altid))
+                else:
+                    nitems.append((k,v))
+            items = nitems
             if sort:
                 items.sort()
         elif sort:
             items = sorted(items)
-        return [child for name, child in items]
+        return [self.lut[childid] for name, childid in items]
 
     def path(self, node):
         """Calculate the path of this node."""

@@ -105,10 +105,22 @@ def test_normal_update():
     assert tree('9') is tree['/a/d/shortcut2']
     assert tree('9') is tree['//[0]/a/d/shortcut2']
 
+    assert tree.link_target('//shortcut1') == tree['//new']['id']
+    assert tree.link_target('/a/d/shortcut2') == tree['/a/c/new2']['id']
+
     ntree = dtree.DTree(**keys)
     ntree.update(dummychi)
     lg.info('child tree\n%s', pprint.pformat(ntree.lut))
     assert ntree.lut == tree.lut
+
+    assert tree.ls('/') == [tree['/a'], tree['/b/']]
+    assert tree.ls('/a') == [tree['/a/c'], tree['/a/d']]
+    assert tree.ls('/a/c') == [tree['/a/c/new2']]
+    assert tree.ls('//new') is tree['//new']
+    assert tree.ls('//shortcut1') is tree['//new']
+    assert tree.ls('/a/c/new2') is tree['/a/c/new2']
+    assert tree.ls('/a/d/shortcut2') is tree['/a/c/new2']
+
 
     # rename
     tree.update([dict(name='changed again', id='8')])
