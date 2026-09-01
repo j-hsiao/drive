@@ -2,6 +2,8 @@
 import json
 import logging
 import os
+import random
+import sys
 
 from . import jutil
 from . import listinit
@@ -386,7 +388,9 @@ class DTree(listinit.ListInit):
             try:
                 node = children[item]
             except KeyError:
-                node = children[item] = self.dirnode(item)
+                tempid = self._tempid()
+                node = self.lut[tempid] = children[item] = self.dirnode(
+                    item, (self.idkey, tempid), (self.parentskey, [node[self.idkey]]))
                 made.append(os.path.join(os.sep, *parts[:depth+1]))
         return node, made
     def makedirs(self, path):
@@ -432,21 +436,35 @@ class DTree(listinit.ListInit):
         if isinstance(nodeOrPath, str):
             nodeOrPath = self[nodeOrPath]
         return self.isdir_(nodeOrPath, link)
+    def isdir_(self, node, link=True):
+        """Check if node (dict) is a dir (or a link pointing to dir if `link`).
+
+        node: the node to check
+        link: Also return True for links to a dir.
+        """
+        if self._isdir_(node):
+            return True
+        if link:
+            tgt = self.link_target_(node, self.lut, True)
+            try:
+                return tgt != node[self.idkey] and self._isdir_(self.lut[tgt])
+            except KeyError:
+                return False
+        return False
 
     def islink(self, nodeOrPath):
+        """Check if path/node is a link."""
         if isinstance(nodeOrPath, str):
             nodeOrPath = self[nodeOrPath]
         return self.islink_(nodeOrPath)
     def link_target(self, nodeOrPath, full=True):
-        """Return target id."""
+        """Return target id of a link.
+
+        Return the node id if not a link.
+        """
         if isinstance(nodeOrPath, str):
             nodeOrPath = self[nodeOrPath]
         return self.link_target_(nodeOrPath, self.lut, full)
-
-    def child(self, node, childname):
-        return self.child_(node, childname, self.lut)
-    def child_(self, node, childname, lut):
-        return lut[node[self.childrenkey][childname]]
 
     def _add_child(self, parent, child):
         """Add connection from parent to child."""
@@ -503,28 +521,77 @@ class DTree(listinit.ListInit):
     # ========================
     # implementation specific:
     # ========================
-    def isdir_(self, node, link=True):
-        """Check if node (dict) is a dir.
+    def tempid(self, maxtries=1000):
+        """Generate a temporary id taht should be distinguishable from real id."""
+        ret = random.randint(0, sys.maxsize)
+        if ret not in self.lut:
+            return ret
+        ret = [ret]
+        for i in range(maxtries):
+            ret.append(random.randint(0, sys.maxsize))
+            k = tuple(ret)
+            if k not in self.lut:
+                return k
+        raise ValueError('Failed to create a unique temp id.')
 
-        node: the node to check
-        link: follow links.
+    def real(self, pathOrNode):
+        """Return whether the node is a real node or just a temporary place holder."""
+        if isinstance(pathOrNode, str):
+            pathOrNode = self.get(pathOrNode)
+            if pathOrNode is None:
+                return False
+        return isinstance(pathOrNode[self.idkey], str)
+
+    def unneeded(self):
+        """Return a list of unnecessary nodes.
+
+        A node is unnecessary if it does not have a real descendant.
         """
-        if self.childrenkey in node:
-            return True
-        if link:
-            tgt = node
-            while 1:
-                try:
-                    for k in self.LINK_TARGET:
-                        tgt = tgt[k]
-                except KeyError:
-                    return self.childrenkey in tgt
-                try:
-                    tgt = self.lut[tgt]
-                except KeyError:
-                    return False
-            return self.isdir_(node, False)
-        return False
+        results = {}
+        q = self.lut.items()
+        ret = []
+        while q:
+            deferred = []
+            for k, v in q:
+                if self.real(v) or k == 0:
+                    results[k] = True
+                    continue
+                children = v.get(self.childrenkey)
+                if not children:
+                    results[k] = False
+                    ret.append(v)
+                    continue
+                for cname, cid in children.items():
+                    need = results.get(cid)
+                    if need is None:
+                        deferred.append((k,v))
+                        break
+                    elif need:
+                        results[k] = True
+                        break
+                else:
+                    # all false, check clashkey
+                    for name, clashids in v.get(self.clashkey, {}).items():
+                        for clashid in clashids:
+                            need = results.get(clashid)
+                            if need is None:
+                                deferred.append((k,v))
+                                break
+                            elif need:
+                                results[k] = True
+                                break
+                        else:
+                            continue
+                        break
+                    else:
+                        results[k] = False
+                        ret.append(v)
+            q = deferred
+        return ret
+
+    def _isdir_(self, node):
+        """Return whether a node is explicitly a dir."""
+        return self.childrenkey in node
 
     def islink_(self, node):
         try:
@@ -538,17 +605,27 @@ class DTree(listinit.ListInit):
         """Calculate the link target.
 
         full: fully follow links til non-link.
+        If there is a link loop, then point to the first
+        encountered member of the loop.
+        ie: links a, b, and c
+        a -> b, b -> c, c -> b, will return b's id.
         """
+        pre = set()
+        tgt = node[self.idkey]
         while 1:
+            if tgt in pre:
+                lg.warning('Loop of links detected: %s', tgt)
+                return tgt
+            pre.add(tgt)
+            nid = tgt
             tgt = node
             for k in self.LINK_TARGET:
                 tgt = tgt.get(k)
                 if tgt is None:
-                    return node[self.idkey]
+                    return nid
             if full:
-                try:
-                    node = self.lut[tgt]
-                except KeyError:
+                node = lut.get(tgt)
+                if node is None:
                     return tgt
             else:
                 return tgt

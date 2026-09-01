@@ -165,6 +165,38 @@ def test_clashing_update():
     assert tree('2')['children'] == dict(b='4')
     assert not tree('2')['clash']
 
+def test_linkloop():
+    nodes = [
+        dict(id='2', parents=['1'], name='a', target='3'),
+        dict(id='3', parents=['1'], name='b', target='2'),
+        dict(id='4', parents=['1'], name='c', target='2'),
+    ]
+    tree = dtree.DTree(nodes)
+    assert tree['/a']['target'] == '3'
+    assert tree['/a']['id'] == '2'
+    assert tree['/b']['target'] == '2'
+    assert tree['/b']['id'] == '3'
+    assert tree['/b']['target'] == '2'
+    assert tree['/c']['id'] == '4'
+
+    assert not tree.isdir('/a')
+    assert not tree.isdir('/b')
+    assert not tree.isdir('/c')
+
+    assert tree.link_target('/a', full=False) == '3'
+    assert tree.link_target('/b', full=False) == '2'
+    assert tree.link_target('/c', full=False) == '2'
+
+    assert tree.link_target('/a', full=True) == '2'
+    assert tree.link_target('/b', full=True) == '3'
+    assert tree.link_target('/c', full=True) == '2'
+
+
+def test_tmpnodes():
+    tree = dtree.DTree()
+    assert len(tree.unneeded()) == 0
+    tree.makedirs('/a/b')
+
 
 
 

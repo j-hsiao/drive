@@ -101,19 +101,9 @@ class DTree(DTree_):
                 *args, **kwargs)
         return False
 
-    def isdir_(self, node, link=True):
-        """Check if node (dict) is a dir."""
-        if self.childrenkey in node:
-            return True
-        mt = node.get('mimeType')
-        if mt == self.MIME_FOLDER:
-            return True
-        if link and mt == self.MIME_LINK:
-            node = self.lut.get(self.link_target_(node, self.lut))
-            if node is None:
-                return False
-            return self.isdir_(node, False)
-        return False
+    def _isdir_(self, node):
+        return self.childrenkey in node or node.get('mimeType') == self.MIME_FOLDER
+
     def islink_(self, node):
         return node.get('mimeType') == self.MIME_LINK
 
