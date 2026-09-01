@@ -1,10 +1,13 @@
 import contextlib
 
-from .googledrive import api, Command, dsearch
+from .googledrive import api, Command, dcache, dconfig
 from pydrive.util import jutil
 
 @api
 class State(Command):
+    SEARCH = {
+        'app': dconfig
+    }
     def __init__(self):
         self.parser = p = self.get_parser()
         p.add_argument('info', choices=['app', 'auth', 'dtree'])
@@ -29,8 +32,9 @@ class State(Command):
                 if args.out:
                     out = args.out[0]
                 else:
-                    out = stack.enter_context(
-                        dsearch.open(args.info + '.json', 'w', force=args.force)[1])
+                    search = self.SEARCH.get(args.info, dcache)
+                    out = stack.enter_context(search.open(
+                        args.info + '.json', 'w', force=args.force)[1])
                 name = getattr(out, 'name', None)
                 if name:
                     print('saving to', repr(name))

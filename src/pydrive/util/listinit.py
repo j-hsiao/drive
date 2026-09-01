@@ -25,8 +25,8 @@ class ListInit(object):
                 errors.append(traceback.format_exc().replace('\n', '\n  '))
                 errors.append('\n')
         else:
-            logging.error('ListInit Failed: %s %s\n%s', args, kwargs, ''.join(errors))
-            raise ValueError('ListInit failed')
+            logging.error('%s Failed: %s %s\n%s', type(self), args, kwargs, ''.join(errors))
+            raise ValueError('{} failed'.format(type(self)))
 
     def _init_selftype(self, other, *args, **kwargs):
         if isinstance(other, type(self)):

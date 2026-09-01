@@ -17,10 +17,16 @@ class DSearch(object):
         else:
             self.prefdir=self.dirs[0]
 
-    def open(self, name, mode, force=False):
-        """Return (created, fileobj).
+    def open(self, name, mode='r', force=False):
+        """Open a matching file and return (Existing?, fileobj).
 
-        If not existing, then prioritize the 1st choice in self.dirs.
+        name: the name of the file, relative to a search dir.
+        mode: rwab+ string like for open()
+        force: bool, force opening even if already exist.
+
+        Generally, if truncation would occur, raise an error unless `force`.
+        Otherwise, open an existing file or create one if it does not already
+        exist.
         """
         fname = self(name, first=True)
         if fname:

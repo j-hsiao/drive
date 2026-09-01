@@ -9,7 +9,7 @@ from pydrive.util import jutil
 from pydrive.util.dsearch import DSearch
 from pydrive.util.dtree import DTree as DTree_
 
-dsearch = DSearch(
+dconfig = DSearch(
     [
         '.',
         '~/.config/pydrive/googledrive',
@@ -17,13 +17,22 @@ dsearch = DSearch(
         '~',
     ]
 )
+dcache = DSearch(
+    [
+        '.',
+        '~/.cache/pydrive/googledrive',
+        '~/.googledrive',
+        '~',
+    ]
+)
+
 
 class AppInfo(jutil.JFile):
     initfuncs = ['_init_none'] + jutil.JFile.initfuncs
 
     def _init_none(self, appjson=None, data=None):
         if appjson is None:
-            appjson = dsearch('*app*.json', first=True)
+            appjson = dconfig('*app*.json', first=True)
             if appjson is None:
                 raise ValueError('No app info found.')
         self._init(appjson, data)
@@ -36,7 +45,7 @@ class Auth(Auth_):
     def _init_None(self, f=None, *args, **kwargs):
         if f is None:
             return self._init(
-                dsearch('*auth*.json', first=True),
+                dcache('*auth*.json', first=True),
                 *args, **kwargs)
         return False
 
@@ -88,7 +97,7 @@ class DTree(DTree_):
     def _init_None(self, initial=None, *args, **kwargs):
         if initial is None:
             return self._init(
-                dsearch('*dtree*.json', first=True),
+                dcache('*dtree*.json', first=True),
                 *args, **kwargs)
         return False
 
@@ -108,9 +117,9 @@ class DTree(DTree_):
     def islink_(self, node):
         return node.get('mimeType') == self.MIME_LINK
 
-    def dirnode(self, name, **kwargs):
+    def dirnode(self, name, *args, **kwargs):
         kwargs.setdefault('mimeType', 'application/vnd.google-apps.folder')
-        return super(DTree, self).dirnode(name, **kwargs)
+        return super(DTree, self).dirnode(name, *args, **kwargs)
 
 
 api = Commands(['auth', 'app', 'dtree'])
