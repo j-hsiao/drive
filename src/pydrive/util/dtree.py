@@ -305,7 +305,7 @@ class DTree(listinit.ListInit):
                     pass
         return node
 
-    def get_(self, path, default=None):
+    def get_(self, path, default=None, partial=False):
         """Return an item from normalized path.
 
         path: a normalized path via self.normpath.
@@ -332,7 +332,9 @@ class DTree(listinit.ListInit):
         """
         node = self.find_root(path)
         try:
-            for item in filter(None, path.split(os.sep)):
+            parts = list(filter(None, path.split(os.sep)))
+            pidx = 0
+            for pidx, item in enumerate(parts):
                 node = self.lut[self.link_target_(node, self.lut)]
                 if item.startswith('@@'):
                     item = item[1:]
@@ -356,13 +358,16 @@ class DTree(listinit.ListInit):
                 node = self.lut[node[self.childrenkey][item]]
             return node
         except KeyError:
-            pass
+            if partial:
+                print('wtf', node, parts[0:pidx], parts[pidx:])
+                return node, parts[0:pidx], parts[pidx:]
         except Exception:
             lg.exception('Error searching for %s', path)
         return default
-    def get(self, path, default=None):
+
+    def get(self, path, default=None, partial=False):
         """Same as get_ but path can be unnormalized."""
-        return self.get_(self.normpath(path), default)
+        return self.get_(self.normpath(path), default, partial)
     def __call__(self, nodeid):
         """Get node via id."""
         return self.lut[nodeid]
@@ -377,9 +382,9 @@ class DTree(listinit.ListInit):
 
         Return (target, created)
         """
-        node = self.root
+        node = self.find_root(path)
+        parts = path.lstrip(os.sep).split(os.sep)
         made = []
-        parts = path.split(os.sep)[1+path.endswith(os.sep):]
         for depth, item in enumerate(parts):
             try:
                 children = node[self.childrenkey]
@@ -388,7 +393,7 @@ class DTree(listinit.ListInit):
             try:
                 node = children[item]
             except KeyError:
-                tempid = self._tempid()
+                tempid = self.tempid()
                 node = self.lut[tempid] = children[item] = self.dirnode(
                     item, (self.idkey, tempid), (self.parentskey, [node[self.idkey]]))
                 made.append(os.path.join(os.sep, *parts[:depth+1]))
