@@ -53,8 +53,6 @@ class DTree(listinit.ListInit):
         if isinstance(rootnames, str):
             rootnames = [rootnames]
         self.rootnames = list(rootnames)
-        if '' not in self.rootnames:
-            self.rootnames.append('')
         self.copy_instance(None, **kwargs)
         if isinstance(initial, str):
             with open(os.path.expanduser(initial), 'r') as f:
@@ -288,24 +286,33 @@ class DTree(listinit.ListInit):
             parts.extend(('', ''))
         return os.sep.join(reversed(parts))
 
-    def find_root(self, path):
-        """Find the root node to use for this path."""
-        node = self.lut[0]
-        if not path.startswith(sroot):
-            children = node[self.childrenkey]
-            for candidate in self.rootnames:
-                try:
-                    return self.lut[children[candidate]]
-                except KeyError:
-                    pass
-            for k, v in sorted(children.items()):
-                try:
-                    return self.lut[v]
-                except KeyError:
-                    pass
-        return node
+    def get_root(self, path):
+        """Get the appropriate root dir node for this path.
 
-    def get_(self, path, default=None, partial=False):
+        If it does not exist, then create it.
+        The root is chosen as:
+        1. if path starts with //, then the toplevel node.
+        2. Otherwise, find the first root dir that:
+           a. Has name in self.rootnames
+           b. alphabetically first root.
+        """
+        node = self.lut[0]
+        if path.startswith(sroot):
+            return node
+        children = node[self.childrenkey]
+        for candidate in self.rootnames:
+            try:
+                return self.lut[children[candidate]]
+            except KeyError:
+                pass
+        for k, v in sorted(children.items()):
+            try:
+                return self.lut[v]
+            except KeyError:
+                pass
+        return self.mkdir_(node, '')
+
+    def get_(self, path, default=None):
         """Return an item from normalized path.
 
         path: a normalized path via self.normpath.
@@ -330,7 +337,7 @@ class DTree(listinit.ListInit):
         @@:name[0]      0th alternative of '@:name'
         @@:name[0]]     name is '@:name[0]'
         """
-        node = self.find_root(path)
+        node = self.get_root(path)
         try:
             parts = list(filter(None, path.split(os.sep)))
             pidx = 0
@@ -358,16 +365,14 @@ class DTree(listinit.ListInit):
                 node = self.lut[node[self.childrenkey][item]]
             return node
         except KeyError:
-            if partial:
-                print('wtf', node, parts[0:pidx], parts[pidx:])
-                return node, parts[0:pidx], parts[pidx:]
+            pass
         except Exception:
             lg.exception('Error searching for %s', path)
         return default
 
-    def get(self, path, default=None, partial=False):
+    def get(self, path, default=None):
         """Same as get_ but path can be unnormalized."""
-        return self.get_(self.normpath(path), default, partial)
+        return self.get_(self.normpath(path), default)
     def __call__(self, nodeid):
         """Get node via id."""
         return self.lut[nodeid]
@@ -377,26 +382,42 @@ class DTree(listinit.ListInit):
             raise KeyError(path)
         return ret
 
+    def mkdir_(self, parent, name, *args, **kwargs):
+        """Create a dir node under parent with name and a generated id."""
+        ndir = self.dirnode(name, *args, **kwargs)
+        nid = ndir.get(self.idkey)
+        if nid is None:
+            nid = random.randint(0, sys.maxsize)
+        for i in range(sys.maxsize):
+            if self.lut.setdefault(nid, ndir) is ndir:
+                ndir[self.idkey] = nid
+                self._add_child(parent, ndir)
+                return ndir
+            nid += 1
+        raise ValueError('ID generation failed.')
+
     def makedirs_(self, path):
         """Create directory + intermediates to normalized path.
 
         Return (target, created)
         """
-        node = self.find_root(path)
-        parts = path.lstrip(os.sep).split(os.sep)
+        node = self.get_root(path)
         made = []
-        for depth, item in enumerate(parts):
+        for item in filter(None, path.split(os.sep)):
             try:
                 children = node[self.childrenkey]
             except KeyError:
                 raise ValueError('Not a directory.')
             try:
-                node = children[item]
+                cid = children[item]
             except KeyError:
-                tempid = self.tempid()
-                node = self.lut[tempid] = children[item] = self.dirnode(
-                    item, (self.idkey, tempid), (self.parentskey, [node[self.idkey]]))
-                made.append(os.path.join(os.sep, *parts[:depth+1]))
+                node = self.mkdir_(node, item)
+                made.append(node)
+            else:
+                try:
+                    node = self.lut[cid]
+                except KeyError:
+                    node = self.mkdir_(node, item, (self.idkey, cid))
         return node, made
     def makedirs(self, path):
         """Make dirs from non-normalized path."""
@@ -526,19 +547,6 @@ class DTree(listinit.ListInit):
     # ========================
     # implementation specific:
     # ========================
-    def tempid(self, maxtries=1000):
-        """Generate a temporary id taht should be distinguishable from real id."""
-        ret = random.randint(0, sys.maxsize)
-        if ret not in self.lut:
-            return ret
-        ret = [ret]
-        for i in range(maxtries):
-            ret.append(random.randint(0, sys.maxsize))
-            k = tuple(ret)
-            if k not in self.lut:
-                return k
-        raise ValueError('Failed to create a unique temp id.')
-
     def real(self, pathOrNode):
         """Return whether the node is a real node or just a temporary place holder."""
         if isinstance(pathOrNode, str):

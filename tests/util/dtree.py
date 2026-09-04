@@ -18,23 +18,6 @@ def norm(l):
     return [os.path.normpath(_) for _ in l]
 
 
-def test_partial_get():
-    nodes = [
-        dict(id='2', name='a', parents=['1']),
-        dict(id='3', name='b', parents=['1']),
-    ]
-    tree = dtree.DTree()
-
-    thing = tree.get('/', partial=True)
-    print(thing)
-    print('wtf', repr(node), repr(pre), repr(post))
-
-    tree.update(nodes)
-    node, pre, post = tree.get('/a/b/c', partial=True)
-    assert node is tree.lut['2']
-    assert pre == ['a']
-    assert post == ['b', 'c']
-
 def test_normal_update():
     # //
     #   new
@@ -99,9 +82,9 @@ def test_normal_update():
         assert tree(str(i)) is tree['/a/c/@:{}'.format(i)]
 
     assert tree('1') is tree['//[0]']
-    assert tree('1') is tree.find_root('/')
-    assert tree('1') is tree.find_root('/a/b/')
-    assert tree(0) is tree.find_root('//a/b/')
+    assert tree('1') is tree.get_root('/')
+    assert tree('1') is tree.get_root('/a/b/')
+    assert tree(0) is tree.get_root('//a/b/')
     assert tree('1') is tree['/']
     assert tree('2') is tree['//[0]/a']
     assert tree('2') is tree['/a']
@@ -213,14 +196,15 @@ def test_linkloop():
 
 
 def test_tmpnodes():
-    nodes = [
-        dict(id='2', name='something')
-    ]
-
+    nodes = [dict(id='2', name='something')]
     tree = dtree.DTree()
     assert len(tree.unneeded()) == 0
-    tree.makedirs('/a/b')
+    result, made = tree.makedirs('/a/b')
     print(tree.lut)
+    tree['/']
+    tree['/a']
+    tree['/a/b']
+
 
 
 # tree = dtree.DTree()
