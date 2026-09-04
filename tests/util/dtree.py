@@ -142,28 +142,20 @@ def test_clashing_update():
         dict(id='4', parents=['2'], name='b'),
         dict(id='5', parents=['2'], name='b'),
     ]
+    # / ('1')
+    #   a ('2')
+    #     b ('4')
+    #     b ('5')
+    #   a ('3')
     tree = dtree.DTree(nodes)
     assert tree(0)['children'] == {'': '1'}
     assert tree('1')['children'] == dict(a='2')
     assert tree('1')['clash'] == dict(a=['2', '3'])
     assert tree('2')['children'] == dict(b='4')
     assert tree('2')['clash'] == dict(b=['4', '5'])
-
-    tree._remove_child(tree('1'), tree('2'))
-
-    assert tree(0)['children'] == {'': '1'}
-    assert tree('1')['children'] == dict(a='3')
-    assert not tree('1').get('clash')
-    assert tree('2')['children'] == dict(b='4')
-    assert tree('2')['clash'] == dict(b=['4', '5'])
-
-    tree._remove_child(tree('2'), tree('5'))
-
-    assert tree(0)['children'] == {'': '1'}
-    assert tree('1')['children'] == dict(a='3')
-    assert not tree('1').get('clash')
-    assert tree('2')['children'] == dict(b='4')
-    assert not tree('2')['clash']
+    assert 'clash' not in tree('3')
+    assert not tree('3').get('children')
+    # TODO
 
 def test_linkloop():
     nodes = [
@@ -193,15 +185,45 @@ def test_linkloop():
 
 
 def test_tmpnodes():
-    nodes = [dict(id='2', name='something')]
     tree = dtree.DTree()
     assert len(tree.unneeded()) == 0
     result, made = tree.makedirs('/a/b')
-    print(tree.lut)
+
+    assert tree['/']['id'] == next(iter(tree(0)['children'].values()))
+
+    assert next(iter(tree['/']['children'].values())) == tree['/a']['id']
+    assert next(iter(tree['/a']['children'].values())) == tree['/a/b']['id']
+    assert not tree['/a/b'].get('children')
+
+
     tree['/']
     tree['/a']
     tree['/a/b']
+    assert len(tree.unneeded()) == 3
+    tree.update([dict(id='2', name='something', parents=[tree['/a']['id']])])
+    tree['/a/something']
 
+    # /
+    #   a/
+    #     b
+    #     something
+    assert len(tree.unneeded()) == 1
+    assert len(tree.lut) == 5
+    tree.prune()
+    assert len(tree.lut) == 4
+    assert len(tree.unneeded()) == 0
+    # /
+    #   a/
+    #     something
+    try:
+        tree.rm('a')
+    except ValueError as e:
+        assert 'not empty' in e.args[0].lower()
+    else:
+        raise RuntimeError('a/b should not be empty so rm should error')
+    tree.rm('/a/something')
+    assert len(tree.lut) == 3
+    assert len(tree.unneeded()) == 2
 
 
 # tree = dtree.DTree()

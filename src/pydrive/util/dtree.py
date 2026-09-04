@@ -120,14 +120,23 @@ class DTree(listinit.ListInit):
     def path(self, node):
         """Calculate the path of this node."""
         parts = []
-        namekey = self.namekey
-        name = node.get(namekey)
-        while name is not None:
+        name = node.get(self.namekey)
+        ign = {}
+        while name:
             parts.append(name)
             try:
-                node = self.lut[node[self.parentskey][0]]
+                pnode = self.lut[node[self.parentskey][0]]
             except KeyError:
                 break
+            nid = node[self.idkey]
+            if pnode.get(self.childrenkey, ign).get(name) != nid:
+                try:
+                    idx = pnode.get(self.clashkey, ign).get(name).index(nid)
+                except IndexError:
+                    lg.warning('Failed to determine child index of node %s', node)
+                else:
+                    parts[-1] = parts[-1] + '[{}]'.format(idx)
+            node = pnode
             name = node.get(self.namekey)
         if name:
             parts.extend(('', ''))
@@ -135,7 +144,7 @@ class DTree(listinit.ListInit):
 
     def get(self, path, default=None):
         """Same as _get but path can be unnormalized."""
-        return self._get(self.normpath(path), default)
+        return self.get_(self.normpath(path), default)
     def __getitem__(self, path):
         ret = self.get(path)
         if ret is None:
@@ -148,10 +157,15 @@ class DTree(listinit.ListInit):
 
     def walk(self, path='.', sort=True):
         """Walk through all descendents of the given path."""
-        path = self.normpath(path)
-        node = self._get(path)
+        if isinstance(path, dict):
+            node = path
+            path = self.path(node)
+        else:
+            path = self.normpath(path)
+            node = self.get_(path)
         for res in self._walk(path, node, sort):
             yield res
+
 
 
     def isdir(self, nodeOrPath, link=True):
@@ -177,12 +191,12 @@ class DTree(listinit.ListInit):
             pathOrNode = self.get(pathOrNode)
             if pathOrNode is None:
                 return False
-        return self._real(pathOrNode)
+        return self.real_(pathOrNode)
 
     def cd(self, path):
         """Change cwd."""
         normed = self.normpath(path)
-        nd = self._get(normed)
+        nd = self.get_(normed)
         if nd is None:
             raise ValueError('{} does not exist or was not loaded.'.format(repr(path)))
         if self._isdir(nd):
@@ -192,10 +206,19 @@ class DTree(listinit.ListInit):
 
     def makedirs(self, path):
         """Make dirs from non-normalized path."""
-        return self._makedirs(self.normpath(path))
-    def touch(self, path):
+        return self.makedirs_(self.normpath(path))
+    def touch(self, path, *args, **Kwargs):
         """Touch a file by non-normalized path."""
-        return self._touch(self.normpath(path))
+        return self.touch_(self.normpath(path), *args, **kwargs)
+    def rm(self, pathOrNode, recurse=False, root=False):
+        """Remove a node.
+
+        recurse: recurseively remove child nodes.
+        root: change child nodes into roots if they have no other parents.
+        """
+        if isinstance(pathOrNode, str):
+            pathOrNode = self[pathOrNode]
+        return self.rm_(pathOrNode, recurse, root)
 
     def update(self, files):
         """Update from sequence of file dicts containing parents key.
@@ -233,15 +256,15 @@ class DTree(listinit.ListInit):
             try:
                 parents = item[parentskey]
             except KeyError:
-                self._add_child(lut[0], item)
+                self._connect(lut[0], item)
             else:
                 for parentid in parents:
                     try:
                         parnode = lut[parentid]
                     except KeyError:
                         parnode = lut[parentid] = self.dirnode('', (idkey, parentid))
-                        self._add_child(lut[0], parnode)
-                    self._add_child(parnode, item)
+                        self._connect(lut[0], parnode)
+                    self._connect(parnode, item)
             children = item.get(childrenkey)
             if children is not None:
                 if not isinstance(children, dict):
@@ -252,7 +275,7 @@ class DTree(listinit.ListInit):
                 for childid in childids:
                     child = lut.get(childid)
                     if child is not None:
-                        self._add_child(item, child)
+                        self._connect(item, child)
 
     def copy_instance(self, initial, *args, **kwargs):
         """Shallow copy values from another dtree."""
@@ -267,7 +290,10 @@ class DTree(listinit.ListInit):
         """Save to out."""
         jutil.save(self.lut, out, **kwargs)
 
-
+    def prune(self):
+        """Prune unneeded nodes."""
+        for node in self.unneeded():
+            self.rm(node)
 
     def _get_root(self, path):
         """Get the appropriate root dir node for this path.
@@ -293,7 +319,7 @@ class DTree(listinit.ListInit):
                 return self.lut[v]
             except KeyError:
                 pass
-        return self._mkdir(node, '')
+        return self.mkdir_(node, '')
 
     def __str__(self):
         if self.cwd == os.sep:
@@ -319,7 +345,7 @@ class DTree(listinit.ListInit):
                 parts.append(os.sep)
         return ''.join(parts)
 
-    def _get(self, path, default=None):
+    def get_(self, path, default=None):
         """Return an item from normalized path.
 
         path: a normalized path via self.normpath.
@@ -377,7 +403,7 @@ class DTree(listinit.ListInit):
             lg.exception('Error searching for %s', path)
         return default
 
-    def _register(self, node):
+    def register(self, node):
         """Register a node.  Generate an id if missing. Return the node."""
         nid = node.get(self.idkey)
         if nid is None:
@@ -391,26 +417,26 @@ class DTree(listinit.ListInit):
             except TypeError:
                 raise ValueError('node with id {} already exists'.format(repr(nid)))
         raise ValueError('ID generation failed.')
-    def _mkdir(self, parent, name, *args, **kwargs):
+    def mkdir_(self, parent, name, *args, **kwargs):
         """Create a dir node under parent with name and a generated id."""
         ndir = self.dirnode(name, *args, **kwargs)
-        self._register(ndir)
-        self._add_child(parent, ndir)
+        self.register(ndir)
+        self._connect(parent, ndir)
         return ndir
-    def _touch(self, path):
+    def touch_(self, path, *args, **kwargs):
         """Touch a file specified by normalized path."""
         dname, bname = os.path.split(path)
-        dnode = self._get(dname)
+        dnode = self.get_(dname)
         try:
            children = dnode[self.childrenkey]
         except KeyError:
            raise ValueError('{} is not a directory'.format(dname))
         ret = children.get(bname)
         if ret is None:
-            ret = self._register(self.node(bname))
-            self._add_child(dnode, ret)
+            ret = self.register(self.node(bname))
+            self._connect(dnode, ret)
         return ret
-    def _makedirs(self, path):
+    def makedirs_(self, path):
         """Create directory + intermediates to normalized path.
 
         Return (target, created)
@@ -425,14 +451,44 @@ class DTree(listinit.ListInit):
             try:
                 cid = children[item]
             except KeyError:
-                node = self._mkdir(node, item)
+                node = self.mkdir_(node, item)
                 made.append(node)
             else:
                 try:
                     node = self.lut[cid]
                 except KeyError:
-                    node = self._mkdir(node, item, (self.idkey, cid))
+                    node = self.mkdir_(node, item, (self.idkey, cid))
         return node, made
+    def rm_(self, node, recurse=False, root=False):
+        ign = {}
+        children = node.get(self.childrenkey, ign)
+        clashes = node.get(self.clashkey, ign)
+        cids = set()
+        cids.update(children.values(), *clashes.values())
+        if root or recurse:
+            for cid in cids:
+                try:
+                    cnode = self.lut[cid]
+                except KeyError:
+                    continue
+                if root:
+                    self._connect(self.lut[0], cnode)
+                    self._rm_parent(node, cnode)
+                else:
+                    self.rm_(cnode, recurse, root)
+        elif cids:
+            raise ValueError('node not empty.')
+        node.pop(self.childrenkey, ign)
+        node.pop(self.clashkey, ign)
+        parents = node.pop(self.parentskey, ())
+        for parent in parents:
+            try:
+                pnode = self.lut[parent]
+            except KeyError:
+                continue
+            self._rm_child(pnode, node)
+        self.lut.pop(node[self.idkey])
+        return node
 
     def _merge(self, old, new):
         """Merge new node data into old node.
@@ -457,7 +513,7 @@ class DTree(listinit.ListInit):
                         for parentid in set(pre).difference(v):
                             parent = self.lut.get(parentid)
                             if parent is not None:
-                                self._remove_child(parent, old)
+                                self._disconnect(parent, old)
                     elif k == self.childrenkey:
                         if isinstance(v, dict):
                             nchildids = set(v.values())
@@ -470,7 +526,7 @@ class DTree(listinit.ListInit):
                         for childid in ochildids.difference(nchildids):
                             child = self.lut.get(childid)
                             if child is not None:
-                                self._remove_child(old, child)
+                                self._disconnect(old, child)
             old[k] = v
         newname = new.get(self.namekey)
         if newname is None or old[self.namekey] == newname:
@@ -482,14 +538,20 @@ class DTree(listinit.ListInit):
                 parent = self.lut.get(parentid)
                 if parent is None:
                     continue
-                self._remove_child(parent, old)
+                self._disconnect(parent, old)
             old[self.parentskey] = parents
         lg.warning('Changing file name for %s: %s -> %s', old[self.idkey], old[self.namekey], newname)
         old[self.namekey] = newname
 
+    def _connect(self, parent, child):
+        self._add_child(parent, child)
+        self._add_parent(parent, child)
+    def _disconnect(self, parent, child):
+        self._rm_child(parent, child)
+        self._rm_parent(parent, child)
 
     def _add_child(self, parent, child):
-        """Add connection from parent to child."""
+        """Add child to parent."""
         cid = child[self.idkey]
         pid = parent[self.idkey]
         cname = child[self.namekey]
@@ -500,68 +562,86 @@ class DTree(listinit.ListInit):
                 'Multiple files with same name %s: %s vs %s',
                 cname, precid, cid)
             clashes = parent.setdefault(self.clashkey, {})
-            clashlist = clashes.setdefault(cname, [precid])
-            if cid not in clashlist:
-                clashlist.append(cid)
-        parents = child.setdefault(self.parentskey, [])
-        if pid not in parents:
-            parents.append(pid)
-            if pid != 0 and 0 in parents:
-                self._remove_child(self.lut[0], child)
+            clist = clashes.setdefault(cname, [precid])
+            clist.append(cid)
+            if self._norm_clash(clist):
+                children[cname] = clist[0]
+            else:
+                raise ValueError('No children after normalizing clash list.')
 
-    def _remove_child(self, parent, child):
-        """Disconnect child from parent."""
+    def _add_parent(self, parent, child):
+        """Add parent to child."""
+        cid = child[self.idkey]
+        pid = parent[self.idkey]
+        parents = child.setdefault(self.parentskey, [])
+        haszero = False
+        for cpid in parents:
+            if cpid == pid:
+                return
+            elif cpid == 0:
+                haszero = True
+        else:
+            parents.append(pid)
+            if pid != 0 and haszero:
+                self._disconnect(self.lut[0], child)
+
+
+    def _rm_child(self, parent, child):
+        """Remove child from parent."""
         cid = child[self.idkey]
         pid = parent[self.idkey]
         cname = child[self.namekey]
         children = parent.get(self.childrenkey)
         if children is not None:
-            newchild = None
-            precid = children.get(cname)
             clashes = parent.get(self.clashkey)
-            if clashes is not None:
+            if clashes:
                 cclashes = clashes.get(cname)
-                if cclashes is not None:
-                    if cid in cclashes:
-                        cclashes.remove(cid)
-                    if cclashes:
-                        newchild = cclashes[0]
-                    if len(cclashes) <= 1:
-                        del clashes[cname]
-            if precid != cid:
-                newchild = precid
-            if newchild is None:
-                del children[cname]
             else:
-                children[cname] = newchild
+                cclashes = None
+            if cclashes:
+                if self._norm_clash(cclashes, [cid]):
+                    children[cname] = cclashes[0]
+                    if len(cclashes) == 1:
+                        del clashes[cname]
+                else:
+                    del children[cname]
+                    del clashes[cname]
+            else:
+                pre = children.pop(cname)
+                if pre != cid:
+                    lg.warning('Remove child from parent, but it was not a child.')
+                    children[cname] = pre
+    def _rm_parent(self, parent, child):
+        """Remove parent from child"""
+        cid = child[self.idkey]
+        pid = parent[self.idkey]
         parents = child.get(self.parentskey)
-        if parents is not None and pid in parents:
-            parents.remove(pid)
-            if not parents:
+        if parents and pid in parents:
+            if len(parents) == 1:
                 del child[self.parentskey]
+            else:
+                parents.remove(pid)
+        else:
+            lg.warning('Remove parent from child but it was not a parent.')
 
     # ========================
     # implementation specific:
     # ========================
-    def _real(self, node):
+    def real_(self, node):
         """Return whether the node is a real node or just a temporary place holder."""
         return isinstance(node.get(self.idkey), str)
 
-    def _norm_clash(self, clashlist):
-        """Return a normalized list of clashing ids.
+    def _norm_clash(self, clashlist, remove=()):
+        """Normalized list of clashing ids inplace.
 
-        clashlist: list of ids of nodes with clashing paths.
+        clashlist: list of clashing ids.
+        remove: seq of ids to remove.
 
-        1. Remove duplicates
-        2. Remove unregistered ids.
-        3. Put the best representative at the beginning.
-           a. real is better than not
-           b. earlier in the list is better
+        Remove dups and place real nodes at beginning of the list.
         """
-        s = set()
-        out = []
-        best = None
-        real = False
+        s = set(remove)
+        oidx = 0
+        temps = []
         for cid in clashlist:
             if cid in s:
                 continue
@@ -570,23 +650,16 @@ class DTree(listinit.ListInit):
                 node = self.lut[cid]
             except KeyError:
                 continue
-            creal = self._real(node)
-            if best is None or (creal and not real):
-                real = creal
-                best = len(out)
-            out.append(cid)
-        if out:
-            pick = out[best]
-            for i in range(best, 0, -1):
-                out[i] = out[i-1]
-            out[0] = pick
-        return out
+            if self.real_(node):
+                clashlist[oidx] = cid
+                oidx += 1
+            else:
+                temps.append(cid)
+        clashlist[oidx:] = temps
+        return clashlist
 
     def unneeded(self):
-        """Return a list of unnecessary nodes.
-
-        A node is unnecessary if it does not have a real descendant.
-        """
+        """Return a list of nodes without any real() descendants."""
         results = {}
         q = self.lut.items()
         ret = []
