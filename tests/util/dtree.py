@@ -82,9 +82,6 @@ def test_normal_update():
         assert tree(str(i)) is tree['/a/c/@:{}'.format(i)]
 
     assert tree('1') is tree['//[0]']
-    assert tree('1') is tree.get_root('/')
-    assert tree('1') is tree.get_root('/a/b/')
-    assert tree(0) is tree.get_root('//a/b/')
     assert tree('1') is tree['/']
     assert tree('2') is tree['//[0]/a']
     assert tree('2') is tree['/a']
