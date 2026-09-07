@@ -494,7 +494,11 @@ class DTree(listinit.ListInit):
         """Merge new node data into old node.
 
         Break any relevant parent/child connections.
+
+        NOTE: keys are expected to be in the same format except
+        self.childrenkey, which can also be a sequence of ids.
         """
+        parkeep = None
         for k, v in new.items():
             try:
                 pre = old[k]
@@ -510,10 +514,13 @@ class DTree(listinit.ListInit):
                         'Changing file value %s for %s: %s -> %s',
                         k, old[self.idkey], pre, v)
                     if k == self.parentskey:
-                        for parentid in set(pre).difference(v):
+                        parpre = set(pre)
+                        for parentid in parpre.difference(v):
                             parent = self.lut.get(parentid)
                             if parent is not None:
-                                self._disconnect(parent, old)
+                                self._rm_child(parent, old)
+                                lg.debug('disconnecting child %s from parent %s', old, parent)
+                        parkeep = parpre.intersection(v)
                     elif k == self.childrenkey:
                         if isinstance(v, dict):
                             nchildids = set(v.values())
@@ -527,19 +534,18 @@ class DTree(listinit.ListInit):
                             child = self.lut.get(childid)
                             if child is not None:
                                 self._disconnect(old, child)
+                                lg.debug('disconnecting parent %s from child %s', old, child)
             old[k] = v
         newname = new.get(self.namekey)
         if newname is None or old[self.namekey] == newname:
             return
+        lg.debug('name changed from %s to %s', old[self.namekey], newname)
         parents = old.get(self.parentskey)
         if parents is not None:
-            parents = list(parents)
-            for parentid in parents:
+            for parentid in (parents if parkeep is None else parkeep):
                 parent = self.lut.get(parentid)
-                if parent is None:
-                    continue
-                self._disconnect(parent, old)
-            old[self.parentskey] = parents
+                if parent is not None:
+                    self._rm_child(parent, old)
         lg.warning('Changing file name for %s: %s -> %s', old[self.idkey], old[self.namekey], newname)
         old[self.namekey] = newname
 
@@ -606,11 +612,17 @@ class DTree(listinit.ListInit):
                 else:
                     del children[cname]
                     del clashes[cname]
+                if not clashes:
+                    del parent[self.clashkey]
             else:
-                pre = children.pop(cname)
-                if pre != cid:
-                    lg.warning('Remove child from parent, but it was not a child.')
-                    children[cname] = pre
+                try:
+                    pre = children.pop(cname)
+                    if pre != cid:
+                        lg.warning('Remove child from parent, but it was not a child.')
+                        children[cname] = pre
+                except KeyError:
+                    lg.warning('Removing child but parent had no child named %s', cname)
+
     def _rm_parent(self, parent, child):
         """Remove parent from child"""
         cid = child[self.idkey]

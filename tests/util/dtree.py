@@ -3,6 +3,7 @@ import os
 import logging
 import sys
 import pprint
+import random
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get('LOGLEVEL', 'WARNING').upper(), logging.WARNING),
@@ -224,6 +225,37 @@ def test_tmpnodes():
     tree.rm('/a/something')
     assert len(tree.lut) == 3
     assert len(tree.unneeded()) == 2
+
+def test_incremental():
+    dummypar = [
+        dict(name='a', parents=['1'], id='2'),
+        dict(name='b', parents=['1'], id='3'),
+
+        dict(name='c', parents=['2'], id='4'),
+        dict(name='d', parents=['2'], id='5'),
+
+        dict(name='new', id='6', extra='whatever'),
+        dict(name='shortcut1', id='7', target='6'),
+
+        dict(name='shortcut2', id='9', parents=['5'], target='8'),
+        dict(name='new2', id='8', extra='whatever', parents=['4']),
+    ]
+    tree1 = dtree.DTree()
+    for item in dummypar:
+        tree1.update([item])
+    tree2 = dtree.DTree(dummypar)
+    assert tree1.lut == tree2.lut
+
+    tree3 = dtree.DTree()
+    for item in dummypar[::-1]:
+        tree3.update([item])
+    assert tree3.lut == tree2.lut
+
+    tree4 = dtree.DTree()
+    random.shuffle(dummypar)
+    for item in dummypar:
+        tree4.update([item])
+    assert tree4.lut == tree2.lut
 
 
 # tree = dtree.DTree()
