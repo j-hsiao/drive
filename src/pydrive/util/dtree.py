@@ -50,16 +50,27 @@ class DTree(listinit.ListInit):
             * can be id, name, children, parents to customize the
             underlying datastructure.
         """
-        if isinstance(rootnames, str):
-            rootnames = [rootnames]
-        self.rootnames = list(rootnames)
-        self.copy_instance(None, **kwargs)
+        restore = None
         if isinstance(initial, str):
             with open(os.path.expanduser(initial), 'r') as f:
-                self.lut = json.load(f)
+                restore = json.load(f)
         elif hasattr(initial, 'read'):
-            self.lut = json.load(f)
+            restore = json.load(f)
+        if rootnames and isinstance(rootnames, str):
+            rootnames = [rootnames]
+        if restore is not None:
+            self.lut = restore['lut']
+            self.rootnames = restore['rootnames']
+            self.copy_instance(None, **restore['keys'])
+            if rootnames and rootnames != self.rootnames:
+                lg.warning('Changing rootnames %s -> %s', self.rootnames, rootnames)
+                self.rootnames = rootnames
+            for k,v in restore['keys'].items():
+                kwargs.setdefault(k,v)
+            self.copy_instance(None, **kwargs)
         else:
+            self.rootnames = rootnames
+            self.copy_instance(None, **kwargs)
             self.lut = {0: self.dirnode('', (self.idkey, 0))}
             if initial:
                 if isinstance(initial, dict):
@@ -281,14 +292,24 @@ class DTree(listinit.ListInit):
         """Shallow copy values from another dtree."""
         if initial is not None:
             for attr in ('lut', 'cwd', 'rootnames'):
-                setattr(self, kwargs.get(attr, getattr(initial, attr)))
+                setattr(self, attr, kwargs.get(attr, getattr(initial, attr)))
+        else:
+            for attr in ('lut', 'cwd', 'rootnames'):
+                v = kwargs.get(attr)
+                if v is not None:
+                    setattr(self, attr, v)
         for key in self.KEYS:
             keyname = key+'key'
             setattr(self, keyname, kwargs.get(keyname, key))
 
     def save(self, out, **kwargs):
         """Save to out."""
-        jutil.save(self.lut, out, **kwargs)
+        jutil.save(
+            dict(
+                lut=self.lut,
+                rootnames=self.rootnames,
+                keys={key+'key': getattr(self, key+'key', key) for key in self.KEYS},
+            ), out, **kwargs)
 
     def prune(self):
         """Prune unneeded nodes."""

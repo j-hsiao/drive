@@ -40,15 +40,44 @@ class AppInfo(jutil.JFile):
             raise ValueError('No app info.')
         return True
 
-class Auth(Auth_):
-    initfuncs = ['_init_None'] + Auth_.initfuncs
-    def _init_None(self, f=None, *args, **kwargs):
-        if f is None:
+class CachedBase(object):
+    def __init__(self, *args, **kwargs)
+        self.initfuncs = ['_init_None', '_init_basename'] + super(BaseCache, self).initfuncs
+        super(CachedBase, self).__init__(*args, **kwargs)
+
+    def _init_None(self, initial=None, *args, **kwargs):
+        """Search for any relevant file to load from."""
+        if initial is None:
             return self._init(
-                dcache('*auth*.json', first=True),
+                dcache('*{}*.json'.format(type(self).__name__.lower()), first=True),
                 *args, **kwargs)
         return False
 
+    def _init_basename(self, basename=None, *args, **kwargs):
+        """Search for a pattern-matched file to load from."""
+        if (basename is None
+                or not isinstance(basename, str):
+                or os.path.normcase(basename).split(os.sep, 1)[0] in '..'):
+            return False
+        bases = []
+        suffix = '_' + type(self).__name__.lower()
+        if suffix not in basename:
+            bases.append(suffix.join(os.path.splitext(basename)))
+        bases.append(basename)
+        bases = [_+'.json' for _ in bases if not _.endswith('.json')] + bases
+        for candidate in dcache(*bases):
+            try:
+                f = open(candidate, 'r')
+            except IOError:
+                pass
+            else:
+                with f:
+                    if self._init(f):
+                        return True
+        return False
+
+
+class Auth(CachedBase, Auth_):
     class Scope(object):
         BASE = 'https://www.googleapis.com/auth/'
         def __init__(self, scope):
@@ -89,17 +118,10 @@ class Auth(Auth_):
     ]
 
 
-class DTree(DTree_):
-    initfuncs = ['_init_None'] + DTree_.initfuncs
+class DTree(CachedBase, DTree_):
     MIME_FOLDER = 'application/vnd.google-apps.folder'
     MIME_LINK = 'application/vnd.google-apps.shortcut'
     LINK_TARGET = ('shortcutDetails', 'targetId')
-    def _init_None(self, initial=None, *args, **kwargs):
-        if initial is None:
-            return self._init(
-                dcache('*dtree*.json', first=True),
-                *args, **kwargs)
-        return False
 
     def _isdir_(self, node):
         return self.childrenkey in node or node.get('mimeType') == self.MIME_FOLDER
@@ -108,7 +130,7 @@ class DTree(DTree_):
         return node.get('mimeType') == self.MIME_LINK
 
     def dirnode(self, name, *args, **kwargs):
-        kwargs.setdefault('mimeType', 'application/vnd.google-apps.folder')
+        kwargs.setdefault('mimeType', self.MIME_FOLDER)
         return super(DTree, self).dirnode(name, *args, **kwargs)
 
 
@@ -130,20 +152,14 @@ class Command(_Command):
 
 
 def interruptdir():
-    candidates = []
-    if os.environ.get('GOOGLEDRIVE_INTERRUPTED', None):
-        candidates.append(os.environ.get['GOOGLEDRIVE_INTERRUPTED'])
-    if os.environ.get('HOME', None):
-        candidates.append(os.path.join(os.environ['HOME'], '.googledrive_interrupted'))
-    candidates.append('.googledrive_interrupted')
-    for candidate in candidates:
+    for candidate in dcache('.googledrive_interrupted'):
         if os.path.isdir(candidate):
             return candidate
+    ret = os.path.expanduser('~/.cache/pydrive/googledrive/.googledrive_interrupted')
     try:
-        os.makedirs(candidates[0])
+        os.makedirs(ret)
     except Exception:
-        print(candidates)
         traceback.print_exc()
         return '.'
     else:
-        return candidates[0]
+        return ret
