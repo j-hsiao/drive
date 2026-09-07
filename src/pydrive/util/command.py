@@ -164,7 +164,8 @@ class Commands(object):
             drivepath = py_include_path(package, filename)
             pypath = os.environ.get('PYTHONPATH', None)
             if pypath:
-                pypath = os.pathsep.join([drivepath, pypath])
+                if drivepath not in pypath.split(os.pathsep):
+                    pypath = os.pathsep.join([drivepath, pypath])
             else:
                 pypath = drivepath
             commandline.append('PYTHONPATH=' + pypath)
@@ -196,6 +197,7 @@ class Commands(object):
                         return
                     fi
                     coproc "${{BASE}}" {{ {COMMANDLINE} ;}}
+                    disown "${{!PID}}" # disown coproc to reduce noise.
                     # Recreate coproc fds because ?coproc fds are not inheritable?
                     # so using drive in a pipe leads to "invalid file descriptor"
                     fds=()
