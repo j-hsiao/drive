@@ -1,5 +1,6 @@
 """Wrap text in ansi escaps to add color when printed to terminal."""
 import base64
+import re
 
 RESET = '\x1b[0m'
 FLAGS = dict(
@@ -97,6 +98,15 @@ FLAGS = dict(
     bbrightcyan=106,
     bbrightwhite=107,
 )
+
+class LazyColor(object):
+    def __init__(self, color, args, kwargs):
+        self.info = color, args, kwargs
+    def __str__(self):
+        color, args, kwargs = self.info
+        return color(*args, **kwargs)
+
+
 class _Color(object):
     """Use __getattr__ to stack colors.
 
@@ -104,9 +114,14 @@ class _Color(object):
     rgb/brgb can be used to specify a color explicitly using rgb.
     Or use (b)rgbRRGGBB where RRGGBB are hex values for each component.
     ex. rgbff0000 for red 255.
+
+    example usage:
+        _Color().brightgreen.bred('abc', 123, sep='-')
+        will have brightgreen as text with red as bg
+        where text is 'abc-123'
     """
     # https://en.wikipedia.org/wiki/ANSI_escape_code
-    # semicolon separated list of codes
+    # "semicolon separated list of codes"
     def __init__(self, pre='', post=RESET):
         self._pre = pre
         self._post = post
@@ -145,18 +160,34 @@ class _Color(object):
         setattr(self, attr, ret)
         return ret
 
+    def lazy(self, *args, **kwargs):
+        """Lazy evaluation useful for example, in a log message.
+
+        Return a LazyColor.  The colored text is only calculated when
+        __str__ is called.  When used in a log message, the message
+        is only formatted if it is actually logged.
+        """
+        return LazyColor(self, args, kwargs)
+    def __getitem__(self, tup):
+        """Lazy, but no kwargs, args must be tuple."""
+        return LazyColor(self, tup, {})
+
     def __call__(self, *args, **kwargs):
-        """Format arguments with color."""
+        """Format arguments with color.
+
+        Convert each argument to str and join with "sep" kwarg.
+        Surround the result with ansi escape codes for color.
+        """
         b = []
         if args:
             if self._pre:
                 b = ['\x1b[', self._pre, 'm']
             sep = kwargs.get('sep', ' ')
-            it = iter(args)
-            b.append(str(next(it)))
+            it = map(str, args)
+            b.append(next(it))
             for item in it:
                 b.append(sep)
-                b.append(str(item))
+                b.append(item)
         b.append(self._post)
         return ''.join(b)
 
@@ -164,3 +195,16 @@ class _Color(object):
         return repr('{}{{}}{}'.format(self._pre, self._post)).join(('Color(', ')'))
 
 color = _Color()
+ansiregex = re.compile('\x1b' r'\[[0-9:;<=>?]*' r'[!"#$%&()*+,-./' "'" r']*' r'[@A-Z[\\\]^_`a-z{|}~]')
+class _plain(object):
+    def __init__(self, txt=None):
+        self.txt = txt
+    def __str__(self):
+        return ansiregex.sub('', str(self.txt))
+    def __getitem__(self, txt):
+        """Lazy stripping ansi codes."""
+        return _plain(txt)
+    def __call__(self, txt):
+        """Return txt without ansi codes."""
+        return ansiregex.sub('', txt)
+plain = _plain()
