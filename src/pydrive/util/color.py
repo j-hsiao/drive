@@ -13,13 +13,34 @@ FLAGS = dict(
     under=4,
     underline=4,
     underlined=4,
+    slowblink=5,
+    fastblink=6,
     swap=7,
+    hide=8,
     cross=9,
     crossed=9,
-    medium=22,
+    font0=10,
+    font1=11,
+    font2=12,
+    font3=13,
+    font4=14,
+    font5=15,
+    font6=16,
+    font7=17,
+    font8=18,
+    font9=19,
+    fraktur=20,
+    under2=21,
     normal=22,
-    hide=8,
+    nitalic=23,
+    nitalics=23,
+    nunder=24,
+    nblink=25,
+    pspace=26,
+    nreverse=27,
     reveal=28,
+    ncross=29,
+    ncrossed=29,
 
     black=30,
     red=31,
@@ -31,15 +52,6 @@ FLAGS = dict(
     white=37,
     default=39,
 
-    brightblack=90,
-    brightred=91,
-    brightgreen=92,
-    brightyellow=93,
-    brightblue=94,
-    brightmagenta=95,
-    brightcyan=96,
-    brightwhite=97,
-
     bblack=40,
     bred=41,
     bgreen=42,
@@ -50,6 +62,32 @@ FLAGS = dict(
     bwhite=47,
     bdefault=49,
 
+    nspace=50,
+    framed=51,
+    encircled=52,
+    overlined=53,
+    nframed=54,
+    ncircled=54,
+    noverlined=55,
+    dunder=59,
+    iunder=60,
+    iunder2=61,
+    iover=62,
+    iover2=63,
+    istress=64,
+    nideo=65,
+    sup=73,
+    sub=74,
+    nsu=75,
+
+    brightblack=90,
+    brightred=91,
+    brightgreen=92,
+    brightyellow=93,
+    brightblue=94,
+    brightmagenta=95,
+    brightcyan=96,
+    brightwhite=97,
     bbrightblack=100,
     bbrightred=101,
     bbrightgreen=102,
@@ -59,65 +97,70 @@ FLAGS = dict(
     bbrightcyan=106,
     bbrightwhite=107,
 )
-FLAGS = {k:str(v) for k,v in FLAGS.items()}
+class _Color(object):
+    """Use __getattr__ to stack colors.
 
-def wrap(text, flags='', end=RESET, reset=True):
-    """Wrap text in color.
-
-    text: the text to wrap
-    end: end sequence, set to '' to not reset afterwards.
-    reset: bool, if True, then reset before the flags.
-
-    flags: a string of white-space-delimited flags:
-        text:
-            [bright]black
-            [bright]red
-            [bright]green
-            [bright]yellow
-            [bright]blue
-            [bright]magenta
-            [bright]cyan
-            [bright]white
-            default
-            #RRGGBB (hex)
-        background:
-            same as text color names but prefix with a b, ex: bblue
-            ##RRGGBB background rgb in hex (2 #s)
-        modifiers:
-            bold/bright
-            normal/medium
-            faint/dark
-            italic/italics ?On some terminals this just swaps fg/bg?
-            under/underline/underlined
-            swap
-            cross/crossed
-            hide
-            reveal
-        reset
-
-        NOTE: bright modifier affects foreground, to use the bright versions
-        in background, use the concatenated bright version of the color instead.
-        ex: bright blue background: bbrightblue
+    Attrs should match FLAGS keys.
+    rgb/brgb can be used to specify a color explicitly using rgb.
+    Or use (b)rgbRRGGBB where RRGGBB are hex values for each component.
+    ex. rgbff0000 for red 255.
     """
-    parts = []
-    if flags:
-        parts.append('\x1b[')
-        pre = '0;' if reset else ''
-        for flag in flags.split():
-            parts.append(pre)
-            if flag.startswith('#'):
-                bg, color = flag.rsplit('#', 1)
-                if bg:
-                    parts.append('48;2')
-                else:
-                    parts.append('38;2')
-                for num in base64.b16decode(color, True):
-                    parts.append(';')
-                    parts.append(str(num))
+    # https://en.wikipedia.org/wiki/ANSI_escape_code
+    # semicolon separated list of codes
+    def __init__(self, pre='', post=RESET):
+        self._pre = pre
+        self._post = post
+
+    def _addcodes(self, *args):
+        """Return string with added codes."""
+        if self._pre:
+            parts = [self._pre]
+        else:
+            parts = []
+        parts.extend(args)
+        return ';'.join(map(str, parts))
+    def rgb(self, r, g, b):
+        return _Color(self._add(38, 2, r, g, b), self._post)
+    def brgb(self, r, g, b):
+        return _Color(self._add(48,2,r,g,b), self._post)
+    def urgb(self, r, g, b):
+        return _Color(self._add(58,2,r,g,b), self._post)
+
+    def __getattr__(self, attr):
+        """Get a new _Color instance with specified color."""
+        try:
+            code = FLAGS[attr]
+        except KeyError:
+            if attr.startswith('rgb'):
+                ncode = self._addcodes(38, 2, *base64.b16decode(attr[3:], True))
+            elif attr.startswith('brgb'):
+                ncode = self._addcodes(48, 2, *base64.b16decode(attr[4:], True))
+            elif attr.startswith('urgb'):
+                ncode = self._addcodes(58, 2, *base64.b16decode(attr[4:], True))
             else:
-                parts.append(FLAGS[flag.lower()])
-            pre = ';'
-        parts.append('m')
-    parts.append(text)
-    parts.append(end)
-    return ''.join(parts)
+                raise AttributeError(attr)
+        else:
+            ncode = self._addcodes(code)
+        ret = _Color(ncode, self._post)
+        setattr(self, attr, ret)
+        return ret
+
+    def __call__(self, *args, **kwargs):
+        """Format arguments with color."""
+        b = []
+        if args:
+            if self._pre:
+                b = ['\x1b[', self._pre, 'm']
+            sep = kwargs.get('sep', ' ')
+            it = iter(args)
+            b.append(str(next(it)))
+            for item in it:
+                b.append(sep)
+                b.append(str(item))
+        b.append(self._post)
+        return ''.join(b)
+
+    def __repr__(self):
+        return repr('{}{{}}{}'.format(self._pre, self._post)).join(('Color(', ')'))
+
+color = _Color()
